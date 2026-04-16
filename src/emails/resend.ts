@@ -11,15 +11,17 @@ const FROM = process.env.EMAIL_FROM ?? "noreply@yourdomain.com";
 export async function sendWelcomeEmail({
   to,
   name,
+  verifyUrl,
 }: {
   to: string;
   name: string;
+  verifyUrl?: string;
 }) {
   return resend.emails.send({
     from: FROM,
     to,
-    subject: "Welcome!",
-    react: createElement(WelcomeEmail, { name }),
+    subject: "Welcome! Verify your email",
+    react: createElement(WelcomeEmail, { name, verifyUrl }),
   });
 }
 

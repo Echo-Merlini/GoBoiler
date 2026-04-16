@@ -1,16 +1,37 @@
 import type { Context, Next } from "hono";
+import { verify } from "hono/jwt";
 import { auth } from "@/auth/auth";
 import { db } from "@/db/client";
 import { user } from "@/db/schema";
 import { eq } from "drizzle-orm";
 
 // ─── Require any authenticated session ──────────────────
+// Accepts: Better Auth cookie session OR wallet JWT Bearer token
 export async function requireAuth(c: Context, next: Next) {
+  // 1. Try Better Auth cookie session
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
-  if (!session) return c.json({ error: "Unauthorized" }, 401);
-  c.set("session", session.session);
-  c.set("user", session.user);
-  await next();
+  if (session) {
+    c.set("session", session.session);
+    c.set("user", session.user);
+    return next();
+  }
+
+  // 2. Fall back to wallet JWT Bearer token
+  const authHeader = c.req.header("Authorization");
+  if (authHeader?.startsWith("Bearer ")) {
+    try {
+      const token = authHeader.slice(7);
+      const payload = await verify(token, process.env.BETTER_AUTH_SECRET!) as { sub: string };
+      const [u] = await db.select().from(user).where(eq(user.id, payload.sub));
+      if (!u) return c.json({ error: "Unauthorized" }, 401);
+      c.set("user", u);
+      return next();
+    } catch {
+      return c.json({ error: "Invalid token" }, 401);
+    }
+  }
+
+  return c.json({ error: "Unauthorized" }, 401);
 }
 
 // ─── Require a linked wallet on the session user ─────────

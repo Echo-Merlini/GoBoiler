@@ -3,7 +3,6 @@ import { verifyMessage } from "viem";
 import { db } from "@/db/client";
 import { siweNonce, user, wallet } from "@/db/schema";
 import { eq } from "drizzle-orm";
-import { auth } from "@/auth/auth";
 import { nanoid } from "@/lib/utils";
 
 // ─── Generate a one-time nonce ───────────────────────────
@@ -91,4 +90,41 @@ export async function findOrCreateWalletUser(
   });
 
   return newUser;
+}
+
+// ─── Link a wallet to an existing authenticated user ─────
+export async function linkWalletToUser({
+  userId,
+  address,
+  chainId,
+}: {
+  userId: string;
+  address: string;
+  chainId: number;
+}) {
+  const addr = address.toLowerCase();
+
+  const [existing] = await db.select().from(wallet).where(eq(wallet.address, addr));
+  if (existing) {
+    if (existing.userId !== userId) throw new Error("Wallet already linked to another account");
+    return; // already linked to this user
+  }
+
+  // Set previous primary wallets to non-primary
+  await db.update(wallet).set({ isPrimary: false }).where(eq(wallet.userId, userId));
+
+  await db.insert(wallet).values({
+    id: nanoid(),
+    userId,
+    address: addr,
+    chainId,
+    isPrimary: true,
+  });
+
+  await db.update(user).set({ walletAddress: addr }).where(eq(user.id, userId));
+}
+
+// ─── Purge expired nonces (call from a periodic job) ─────
+export async function purgeExpiredNonces() {
+  await db.delete(siweNonce).where(eq(siweNonce.expiresAt, new Date(0)));
 }

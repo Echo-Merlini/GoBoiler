@@ -3,7 +3,11 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { magicLink, organization, twoFactor } from "better-auth/plugins";
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
-import { sendMagicLinkEmail } from "@/emails/resend";
+import {
+  sendMagicLinkEmail,
+  sendWelcomeEmail,
+  sendResetPasswordEmail,
+} from "@/emails/resend";
 
 export const auth = betterAuth({
   database: drizzleAdapter(db, {
@@ -22,6 +26,12 @@ export const auth = betterAuth({
   emailAndPassword: {
     enabled: true,
     requireEmailVerification: true,
+    sendVerificationEmail: async ({ user, url }) => {
+      await sendWelcomeEmail({ to: user.email, name: user.name, verifyUrl: url });
+    },
+    sendResetPassword: async ({ user, url }) => {
+      await sendResetPasswordEmail({ to: user.email, link: url });
+    },
   },
 
   socialProviders: {
@@ -44,7 +54,11 @@ export const auth = betterAuth({
         invitation: schema.invitation,
       },
     }),
-    twoFactor(),
+    twoFactor({
+      schema: {
+        twoFactor: schema.twoFactor,
+      },
+    }),
   ],
 });
 
