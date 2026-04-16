@@ -123,6 +123,13 @@ export const invitation = pgTable("invitation", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+// ─── Settings (admin-configurable service config) ────────
+export const settings = pgTable("settings", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 // ─── Two-Factor Auth (Better Auth twoFactor plugin) ──────
 export const twoFactor = pgTable("two_factor", {
   id: text("id").primaryKey(),

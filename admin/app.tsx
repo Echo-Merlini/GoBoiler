@@ -16,6 +16,14 @@ type Wallet = {
   id: string; address: string; chainId: number; isPrimary: boolean;
   userId: string; userEmail: string; userName: string; createdAt: string;
 };
+type ServiceField = { set: boolean; source: "db" | "env" | "unset"; value: string | null };
+type Services = {
+  auth:     { googleClientId: ServiceField; googleClientSecret: ServiceField };
+  email:    { resendApiKey: ServiceField; emailFrom: ServiceField };
+  stripe:   { secretKey: ServiceField; webhookSecret: ServiceField; proPriceId: ServiceField; enterprisePriceId: ServiceField };
+  crypto:   { ethRpcUrl: ServiceField; baseRpcUrl: ServiceField; polygonRpcUrl: ServiceField; siweDomain: ServiceField; siweStatement: ServiceField };
+  database: { url: ServiceField };
+};
 type Stats = {
   totalUsers: number; totalSessions: number; totalWallets: number;
   planCounts: { plan: string; total: number }[];
@@ -88,6 +96,30 @@ const S = {
   }),
   empty: { textAlign: "center" as const, padding: 48, color: "#94a3b8", fontSize: 14 },
   chip: { display: "inline-block", padding: "1px 7px", borderRadius: 20, fontSize: 11, background: "#f1f5f9", color: "#64748b" },
+  svcTabs: { display: "flex", gap: 4, marginBottom: 24, borderBottom: "2px solid #e2e8f0", paddingBottom: 0 },
+  svcTab: (active: boolean): React.CSSProperties => ({
+    padding: "8px 18px", fontSize: 13, fontWeight: 600, cursor: "pointer", border: "none", background: "none",
+    color: active ? "#6366f1" : "#64748b",
+    borderBottom: active ? "2px solid #6366f1" : "2px solid transparent",
+    marginBottom: -2, transition: "all .15s",
+  }),
+  svcGroup: { marginBottom: 28 },
+  svcLabel: { fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase" as const, letterSpacing: .8, marginBottom: 12 },
+  svcRow: { display: "flex", alignItems: "center", gap: 12, marginBottom: 12 },
+  svcRowLabel: { width: 200, fontSize: 13, color: "#475569", flexShrink: 0 },
+  svcInput: { flex: 1, padding: "7px 10px", border: "1px solid #e2e8f0", borderRadius: 6, fontSize: 13, color: "#0f172a", background: "#fff", outline: "none" } as React.CSSProperties,
+  svcBadge: (source: string): React.CSSProperties => ({
+    fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 20, letterSpacing: .4,
+    background: source === "db" ? "#ede9fe" : source === "env" ? "#dbeafe" : "#f1f5f9",
+    color: source === "db" ? "#6d28d9" : source === "env" ? "#1d4ed8" : "#94a3b8",
+  }),
+  svcFooter: { display: "flex", gap: 10, marginTop: 20, paddingTop: 20, borderTop: "1px solid #f1f5f9" },
+  testResult: (ok: boolean): React.CSSProperties => ({
+    marginTop: 12, padding: "10px 14px", borderRadius: 6, fontSize: 13,
+    background: ok ? "#f0fdf4" : "#fef2f2",
+    color: ok ? "#16a34a" : "#dc2626",
+    border: `1px solid ${ok ? "#bbf7d0" : "#fecaca"}`,
+  }),
 };
 
 // ─── Toast ───────────────────────────────────────────────
@@ -320,12 +352,198 @@ function Wallets() {
   );
 }
 
+// ─── Services ────────────────────────────────────────────
+const SVC_TABS = ["Auth", "Email", "Stripe", "Crypto", "Database"] as const;
+type SvcTab = typeof SVC_TABS[number];
+
+function FieldRow({ label, fieldKey, field, edits, setEdits }: {
+  label: string; fieldKey: string;
+  field: ServiceField;
+  edits: Record<string, string>;
+  setEdits: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+}) {
+  const val = edits[fieldKey] !== undefined ? edits[fieldKey] : (field.value ?? "");
+  return (
+    <div style={S.svcRow}>
+      <div style={S.svcRowLabel}>{label}</div>
+      <input
+        style={S.svcInput}
+        type="text"
+        placeholder={field.set ? "●●●●●●●● (leave blank to keep)" : "Not configured"}
+        value={val}
+        onChange={e => setEdits(p => ({ ...p, [fieldKey]: e.target.value }))}
+      />
+      <span style={S.svcBadge(field.source)}>{field.source}</span>
+    </div>
+  );
+}
+
+function ServiceSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div style={S.svcGroup}>
+      <div style={S.svcLabel}>{title}</div>
+      {children}
+    </div>
+  );
+}
+
+function Services({ toast }: { toast: (m: string, t?: "ok" | "err") => void }) {
+  const [tab, setTab] = useState<SvcTab>("Auth");
+  const [svc, setSvc] = useState<Services | null>(null);
+  const [edits, setEdits] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+
+  useEffect(() => {
+    api<Services>("/services").then(setSvc).catch(() => {});
+  }, []);
+
+  useEffect(() => { setEdits({}); setTestResult(null); }, [tab]);
+
+  const save = async () => {
+    const payload: Record<string, string> = {};
+    // Map camelCase edits back to snake_case keys
+    const keyMap: Record<string, string> = {
+      googleClientId: "google_client_id", googleClientSecret: "google_client_secret",
+      resendApiKey: "resend_api_key", emailFrom: "email_from",
+      secretKey: "stripe_secret_key", webhookSecret: "stripe_webhook_secret",
+      proPriceId: "stripe_pro_price_id", enterprisePriceId: "stripe_enterprise_price_id",
+      ethRpcUrl: "eth_rpc_url", baseRpcUrl: "base_rpc_url", polygonRpcUrl: "polygon_rpc_url",
+      siweDomain: "siwe_domain", siweStatement: "siwe_statement",
+      url: "database_url",
+    };
+    for (const [k, v] of Object.entries(edits)) {
+      if (keyMap[k] && v !== "") payload[keyMap[k]] = v;
+    }
+    if (!Object.keys(payload).length) return;
+    setSaving(true);
+    try {
+      await api("/services", { method: "PATCH", body: JSON.stringify(payload) });
+      const fresh = await api<Services>("/services");
+      setSvc(fresh);
+      setEdits({});
+      toast("Saved");
+    } catch (e: any) { toast(e.message, "err"); }
+    setSaving(false);
+  };
+
+  const test = async (service: string) => {
+    setTesting(true); setTestResult(null);
+    try {
+      const res = await api<{ ok: boolean; message: string }>(`/services/test/${service}`);
+      setTestResult(res);
+    } catch (e: any) { setTestResult({ ok: false, message: e.message }); }
+    setTesting(false);
+  };
+
+  if (!svc) return <div style={S.empty}>Loading…</div>;
+
+  const hasEdits = Object.values(edits).some(v => v !== "");
+
+  return (
+    <>
+      <div style={S.pageTitle}>Services</div>
+      <div style={S.svcTabs}>
+        {SVC_TABS.map(t => <button key={t} style={S.svcTab(tab === t)} onClick={() => setTab(t)}>{t}</button>)}
+      </div>
+
+      <div style={S.card}>
+        {tab === "Auth" && (
+          <>
+            <ServiceSection title="Google OAuth">
+              <FieldRow label="Client ID"     fieldKey="googleClientId"     field={svc.auth.googleClientId}     edits={edits} setEdits={setEdits} />
+              <FieldRow label="Client Secret" fieldKey="googleClientSecret" field={svc.auth.googleClientSecret} edits={edits} setEdits={setEdits} />
+            </ServiceSection>
+            <div style={{ fontSize: 12, color: "#94a3b8" }}>
+              Get credentials at <a href="https://console.cloud.google.com/apis/credentials" target="_blank" style={{ color: "#6366f1" }}>Google Cloud Console</a>. Add <code>http://localhost:3000/auth/callback/google</code> as an authorised redirect URI.
+            </div>
+          </>
+        )}
+
+        {tab === "Email" && (
+          <>
+            <ServiceSection title="Resend">
+              <FieldRow label="API Key"    fieldKey="resendApiKey" field={svc.email.resendApiKey} edits={edits} setEdits={setEdits} />
+              <FieldRow label="From Email" fieldKey="emailFrom"    field={svc.email.emailFrom}    edits={edits} setEdits={setEdits} />
+            </ServiceSection>
+            <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 8 }}>
+              Get your API key at <a href="https://resend.com/api-keys" target="_blank" style={{ color: "#6366f1" }}>resend.com/api-keys</a>. Domain must be verified to send from custom addresses.
+            </div>
+            {testResult && <div style={S.testResult(testResult.ok)}>{testResult.ok ? "✓" : "✗"} {testResult.message}</div>}
+          </>
+        )}
+
+        {tab === "Stripe" && (
+          <>
+            <ServiceSection title="Keys">
+              <FieldRow label="Secret Key"      fieldKey="secretKey"      field={svc.stripe.secretKey}      edits={edits} setEdits={setEdits} />
+              <FieldRow label="Webhook Secret"  fieldKey="webhookSecret"  field={svc.stripe.webhookSecret}  edits={edits} setEdits={setEdits} />
+            </ServiceSection>
+            <ServiceSection title="Price IDs">
+              <FieldRow label="Pro Plan"        fieldKey="proPriceId"        field={svc.stripe.proPriceId}        edits={edits} setEdits={setEdits} />
+              <FieldRow label="Enterprise Plan" fieldKey="enterprisePriceId" field={svc.stripe.enterprisePriceId} edits={edits} setEdits={setEdits} />
+            </ServiceSection>
+            <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 8 }}>
+              Get keys at <a href="https://dashboard.stripe.com/apikeys" target="_blank" style={{ color: "#6366f1" }}>dashboard.stripe.com/apikeys</a>. For local testing use <code>stripe listen --forward-to localhost:3000/billing/webhook</code>.
+            </div>
+            {testResult && <div style={S.testResult(testResult.ok)}>{testResult.ok ? "✓" : "✗"} {testResult.message}</div>}
+          </>
+        )}
+
+        {tab === "Crypto" && (
+          <>
+            <ServiceSection title="RPC Endpoints">
+              <FieldRow label="Ethereum"    fieldKey="ethRpcUrl"     field={svc.crypto.ethRpcUrl}     edits={edits} setEdits={setEdits} />
+              <FieldRow label="Base"        fieldKey="baseRpcUrl"    field={svc.crypto.baseRpcUrl}    edits={edits} setEdits={setEdits} />
+              <FieldRow label="Polygon"     fieldKey="polygonRpcUrl" field={svc.crypto.polygonRpcUrl} edits={edits} setEdits={setEdits} />
+            </ServiceSection>
+            <ServiceSection title="SIWE">
+              <FieldRow label="Domain"    fieldKey="siweDomain"    field={svc.crypto.siweDomain}    edits={edits} setEdits={setEdits} />
+              <FieldRow label="Statement" fieldKey="siweStatement" field={svc.crypto.siweStatement} edits={edits} setEdits={setEdits} />
+            </ServiceSection>
+            <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 8 }}>
+              Get RPC URLs at <a href="https://www.alchemy.com" target="_blank" style={{ color: "#6366f1" }}>Alchemy</a> or <a href="https://www.infura.io" target="_blank" style={{ color: "#6366f1" }}>Infura</a>.
+            </div>
+            {testResult && <div style={S.testResult(testResult.ok)}>{testResult.ok ? "✓" : "✗"} {testResult.message}</div>}
+          </>
+        )}
+
+        {tab === "Database" && (
+          <>
+            <ServiceSection title="Connection">
+              <FieldRow label="Database URL" fieldKey="url" field={svc.database.url} edits={edits} setEdits={setEdits} />
+            </ServiceSection>
+            <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 8 }}>
+              Supports any Postgres-compatible URL. Supabase, Neon, Railway, PlanetScale (via proxy). Restart required for DB URL changes to fully take effect.
+            </div>
+            {testResult && <div style={S.testResult(testResult.ok)}>{testResult.ok ? "✓" : "✗"} {testResult.message}</div>}
+          </>
+        )}
+
+        <div style={S.svcFooter}>
+          {hasEdits && (
+            <button style={S.btn("primary")} onClick={save} disabled={saving}>
+              {saving ? "Saving…" : "Save changes"}
+            </button>
+          )}
+          {tab === "Email"    && <button style={S.btn("ghost")} onClick={() => test("email")}    disabled={testing}>{testing ? "Testing…" : "Send test email"}</button>}
+          {tab === "Stripe"   && <button style={S.btn("ghost")} onClick={() => test("stripe")}   disabled={testing}>{testing ? "Testing…" : "Test Stripe connection"}</button>}
+          {tab === "Crypto"   && <button style={S.btn("ghost")} onClick={() => test("crypto")}   disabled={testing}>{testing ? "Testing…" : "Test ETH RPC"}</button>}
+          {tab === "Database" && <button style={S.btn("ghost")} onClick={() => test("database")} disabled={testing}>{testing ? "Testing…" : "Ping database"}</button>}
+        </div>
+      </div>
+    </>
+  );
+}
+
 // ─── App ─────────────────────────────────────────────────
 const PAGES = [
   { id: "dashboard", label: "Dashboard", icon: "⬛" },
   { id: "users",     label: "Users",     icon: "👤" },
   { id: "sessions",  label: "Sessions",  icon: "🔑" },
   { id: "wallets",   label: "Wallets",   icon: "🔗" },
+  { id: "services",  label: "Services",  icon: "⚙️" },
 ];
 
 function App() {
@@ -370,6 +588,7 @@ function App() {
         {page === "users"     && <Users toast={toast} />}
         {page === "sessions"  && <Sessions toast={toast} />}
         {page === "wallets"   && <Wallets />}
+        {page === "services"  && <Services toast={toast} />}
       </main>
 
       {toastMsg && (
