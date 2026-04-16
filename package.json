@@ -1,0 +1,38 @@
+{
+  "name": "goboiler",
+  "version": "0.1.0",
+  "description": "TypeScript backend boilerplate — Hono + Better Auth + SIWE + Stripe + Resend + viem",
+  "module": "src/index.ts",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --watch src/index.ts",
+    "start": "bun run src/index.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "bun run src/db/migrate.ts",
+    "db:studio": "drizzle-kit studio"
+  },
+  "dependencies": {
+    "better-auth": "^1.2.7",
+    "drizzle-orm": "^0.41.0",
+    "hono": "^4.7.7",
+    "@hono/node-server": "^1.13.7",
+    "postgres": "^3.4.5",
+    "resend": "^4.5.1",
+    "@react-email/components": "^0.0.35",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "stripe": "^17.7.0",
+    "viem": "^2.23.10",
+    "siwe": "^2.3.2",
+    "zod": "^3.24.3",
+    "nanoid": "^5.1.5",
+    "@hono/zod-validator": "^0.4.3"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.2",
+    "@types/react-dom": "^19.1.2",
+    "drizzle-kit": "^0.30.4",
+    "typescript": "^5.8.3",
+    "bun-types": "latest"
+  }
+}
