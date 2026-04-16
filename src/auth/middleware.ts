@@ -56,6 +56,18 @@ export function requirePlan(minPlan: "free" | "pro" | "enterprise") {
   };
 }
 
+// ─── Require admin — isAdmin flag OR ADMIN_EMAIL env match ──────────────
+export async function requireAdmin(c: Context, next: Next) {
+  const session = await auth.api.getSession({ headers: c.req.raw.headers });
+  if (!session) return c.json({ error: "Unauthorized" }, 401);
+  const u = session.user as { email: string; isAdmin?: boolean };
+  const isAdmin = u.isAdmin || u.email === process.env.ADMIN_EMAIL;
+  if (!isAdmin) return c.json({ error: "Forbidden" }, 403);
+  c.set("user", session.user);
+  c.set("session", session.session);
+  await next();
+}
+
 // ─── Require ERC20/721 token ownership (set by token-gate middleware) ────
 export async function requireToken(c: Context, next: Next) {
   const hasToken = c.get("hasToken");

@@ -9,7 +9,9 @@
     "start": "bun run src/index.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "bun run src/db/migrate.ts",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "admin:build": "bun build admin/app.tsx --outfile public/admin/app.js --minify",
+    "admin:dev": "bun build admin/app.tsx --outfile public/admin/app.js --watch"
   },
   "dependencies": {
     "better-auth": "^1.2.7",

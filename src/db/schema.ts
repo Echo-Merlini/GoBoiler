@@ -23,6 +23,7 @@ export const user = pgTable("user", {
   walletAddress: text("wallet_address").unique(),
   stripeCustomerId: text("stripe_customer_id"),
   plan: text("plan").notNull().default("free"), // free | pro | enterprise
+  isAdmin: boolean("is_admin").notNull().default(false),
 });
 
 export const session = pgTable("session", {

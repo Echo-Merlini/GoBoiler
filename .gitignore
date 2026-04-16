@@ -8,3 +8,4 @@ drizzle/meta/
 .drizzle/
 bun.lockb
 .DS_Store
+public/admin/app.js
