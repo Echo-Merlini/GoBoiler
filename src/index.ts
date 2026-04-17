@@ -41,7 +41,7 @@ async function seedAdmin() {
   }
 
   await auth.api.signUpEmail({ body: { email, password, name: "Admin" } });
-  await db.update(user).set({ isAdmin: true }).where(eq(user.email, email));
+  await db.update(user).set({ isAdmin: true, emailVerified: true }).where(eq(user.email, email));
   console.log(`✓ Admin user created: ${email}`);
 }
 
