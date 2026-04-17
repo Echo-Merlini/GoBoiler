@@ -81,6 +81,54 @@ const T: Record<string, React.CSSProperties> = {
   }),
 };
 
+// ─── Icons (16×16 viewBox, stroke, single-path) ──────────
+const ICONS: Record<string, string> = {
+  // section
+  grid:    "M1 1h6v6H1zm8 0h6v6H9zM1 9h6v6H1zm8 0h6v6H9z",
+  gear:    "M8 5a3 3 0 1 0 0 6A3 3 0 0 0 8 5zM8 0v2m0 12v2M0 8h2m12 0h2m-2.34-5.66-1.42 1.42M4.76 11.24l-1.42 1.42m0-9.32 1.42 1.42m7.07 7.07 1.42 1.42",
+  sparkle: "M8 1l2 5.5h5.5l-4.5 3 1.5 5.5L8 12l-4.5 3 1.5-5.5L1 6.5H6.5z",
+  shield:  "M8 1L1 4v5c0 3.9 3 6 7 7 4-1 7-3.1 7-7V4z",
+  server:  "M1 3h14v4H1zm0 6h14v4H1zM4 5.5h.01M4 11.5h.01",
+  // items – general
+  home:    "M2 7L8 2l6 5v8H2zM5 15V9h6v6",
+  users:   "M8 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm-5 7a5 5 0 0 1 10 0",
+  clock:   "M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zm0 4v4l3 1.5",
+  wallet:  "M1 4h14v9H1zm0 4h14M11 10a1 1 0 1 0 0 2 1 1 0 0 0 0-2",
+  // items – services
+  key:     "M10 2a4 4 0 1 1 0 8 4 4 0 0 1 0-8zM6 9l-5 5m1.5-1.5 1.5 1.5",
+  mail:    "M1 3h14v10H1zm0 0 7 5.5L15 3",
+  card:    "M1 4h14v8H1zM1 8h14M4 11h2",
+  chain:   "M5 9a2 2 0 0 1 0-3l1-1a2 2 0 0 1 3 3l-1 1m3-6a2 2 0 0 1 0 3l-1 1a2 2 0 0 1-3-3l1-1",
+  db:      "M2 5c0-1.1 2.7-2 6-2s6 .9 6 2v6c0 1.1-2.7 2-6 2s-6-.9-6-2zm0 0v6m12-6v6M2 8.5c0 1.1 2.7 2 6 2s6-.9 6-2",
+  folder:  "M1 4h5l2 2h7v8H1z",
+  // items – ai
+  cpu:     "M4 4h8v8H4zM2 6h2m8 0h2M2 10h2m8 0h2M6 2v2m4-2v2M6 12v2m4-2v2M6 6h4v4H6z",
+  plug:    "M6 2v4m4-4v4M2 8h12v2a6 6 0 0 1-12 0zm6 7v1",
+  stars:   "M8 1l1.5 4h4l-3.2 2.4 1.2 4L8 9.2 4.5 11.4l1.2-4L2.5 5h4z",
+  // items – security
+  apikey:  "M10 2a4 4 0 1 1 0 8 4 4 0 0 1 0-8zM6.5 9.5l-5.5 5.5m2-2 1.5 1.5",
+  hook:    "M14 3H9.5m4.5 0-7.5 7M9.5 3H5a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7.5",
+  flag:    "M4 1v14m0-14h9L11 5l2 5H4",
+  // items – system
+  timer:   "M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zM8 5v4l2.5 1.5M5 1h6",
+  layers:  "M8 1l7 3.5-7 3.5-7-3.5zm0 5 7 3.5-7 3.5-7-3.5zm0 5 7 3.5-7 3.5-7-3.5",
+  bell:    "M8 1a5 5 0 0 1 5 5v4l1.5 2H2L3.5 10V6a5 5 0 0 1 5-5zM7 14a1 1 0 0 0 2 0",
+  list:    "M1 4h14M1 8h10M1 12h12",
+  notif:   "M8 1a5 5 0 0 1 5 5v4l1.5 2H2L3.5 10V6a5 5 0 0 1 5-5zM7 14a1 1 0 0 0 2 0m4-7.5a.5.5 0 1 0 0-1 .5.5 0 0 0 0 1",
+  clip:    "M5 2h6a1 1 0 0 1 0 2H5a1 1 0 0 1 0-2zM3 3h10v11H3zm2 6h6m-6 3h4",
+  // footer
+  help:    "M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zM8 11v.5M8 5a2 2 0 0 1 1.2 3.6c-.7.5-1.2.8-1.2 1.4",
+  signout: "M11 2h3v12h-3M7 11l-4-3 4-3m-4 3h9",
+};
+
+function Icon({ name, size = 14 }: { name: string; size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, display: "block" }}>
+      <path d={ICONS[name] ?? ""} />
+    </svg>
+  );
+}
+
 // ─── Shared helpers ───────────────────────────────────────
 function Btn({ label, variant = "primary", onClick, disabled }: { label: string; variant?: "primary" | "danger" | "ghost"; onClick?: () => void; disabled?: boolean }) {
   const bg = variant === "primary" ? C.accentDark : variant === "danger" ? "#7f1d1d" : C.surface;
@@ -1969,44 +2017,63 @@ type AuditEntry = { id: string; action: string; resource: string; resourceId: st
 type Job = { id: string; type: string; status: string; attempts: number; maxAttempts: number; runAt: string; processedAt: string | null; error: string | null; createdAt: string };
 
 const NAV = [
-  { section: "General", items: [
-    { id: "dashboard", label: "Dashboard" },
-    { id: "users",     label: "Users" },
-    { id: "sessions",  label: "Sessions" },
-    { id: "wallets",   label: "Wallets" },
+  { section: "General", icon: "grid", items: [
+    { id: "dashboard", label: "Dashboard", icon: "home" },
+    { id: "users",     label: "Users",     icon: "users" },
+    { id: "sessions",  label: "Sessions",  icon: "clock" },
+    { id: "wallets",   label: "Wallets",   icon: "wallet" },
   ]},
-  { section: "Services", items: [
-    { id: "svc:auth",     label: "Auth" },
-    { id: "svc:email",    label: "Email" },
-    { id: "svc:stripe",   label: "Stripe" },
-    { id: "svc:crypto",   label: "Crypto" },
-    { id: "svc:database", label: "Database" },
-    { id: "svc:storage",  label: "Storage" },
+  { section: "Services", icon: "gear", items: [
+    { id: "svc:auth",     label: "Auth",     icon: "key" },
+    { id: "svc:email",    label: "Email",    icon: "mail" },
+    { id: "svc:stripe",   label: "Stripe",   icon: "card" },
+    { id: "svc:crypto",   label: "Crypto",   icon: "chain" },
+    { id: "svc:database", label: "Database", icon: "db" },
+    { id: "svc:storage",  label: "Storage",  icon: "folder" },
   ]},
-  { section: "AI", items: [
-    { id: "svc:agent", label: "Agent Keys" },
-    { id: "mcp",       label: "MCP Servers" },
-    { id: "skills",    label: "Skills" },
+  { section: "AI", icon: "sparkle", items: [
+    { id: "svc:agent", label: "Agent Keys",  icon: "cpu" },
+    { id: "mcp",       label: "MCP Servers", icon: "plug" },
+    { id: "skills",    label: "Skills",      icon: "stars" },
   ]},
-  { section: "Security", items: [
-    { id: "apikeys",  label: "API Keys" },
-    { id: "webhooks", label: "Webhooks" },
-    { id: "flags",    label: "Feature Flags" },
+  { section: "Security", icon: "shield", items: [
+    { id: "apikeys",  label: "API Keys",      icon: "apikey" },
+    { id: "webhooks", label: "Webhooks",      icon: "hook" },
+    { id: "flags",    label: "Feature Flags", icon: "flag" },
   ]},
-  { section: "System", items: [
-    { id: "cron",   label: "Cron Jobs" },
-    { id: "jobs",   label: "Job Queue" },
-    { id: "push",   label: "Push / PWA" },
-    { id: "logs",   label: "Logs" },
-    { id: "notifs", label: "Notifications" },
-    { id: "audit",  label: "Audit Log" },
+  { section: "System", icon: "server", items: [
+    { id: "cron",   label: "Cron Jobs",     icon: "timer" },
+    { id: "jobs",   label: "Job Queue",     icon: "layers" },
+    { id: "push",   label: "Push / PWA",   icon: "bell" },
+    { id: "logs",   label: "Logs",         icon: "list" },
+    { id: "notifs", label: "Notifications", icon: "notif" },
+    { id: "audit",  label: "Audit Log",    icon: "clip" },
   ]},
 ];
 
-function NavItem({ id, label, active, onClick }: { id: string; label: string; active: boolean; onClick: () => void }) {
+function NavSection({ group, activePage, onSelect }: {
+  group: { section: string; icon: string; items: { id: string; label: string; icon: string }[] };
+  activePage: Page;
+  onSelect: (id: Page) => void;
+}) {
+  const hasActive = group.items.some(i => i.id === activePage);
+  const [open, setOpen] = useState(hasActive);
+  useEffect(() => { if (hasActive) setOpen(true); }, [hasActive]);
   return (
-    <div onClick={onClick} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 16px", cursor: "pointer", borderRadius: 7, margin: "1px 8px", background: active ? C.surface : "transparent", color: active ? C.text : C.muted, fontWeight: active ? 600 : 400, fontSize: 13, borderLeft: active ? `3px solid ${C.accent}` : "3px solid transparent", transition: "all .12s" }}>
-      {label}
+    <div>
+      <div onClick={() => setOpen(o => !o)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px", margin: "2px 4px", cursor: "pointer", borderRadius: 6, color: hasActive ? C.text : C.muted, fontSize: 10, fontWeight: 700, letterSpacing: 0.8, textTransform: "uppercase" as const, userSelect: "none" as const }}>
+        <Icon name={group.icon} size={12} />
+        <span style={{ flex: 1 }}>{group.section}</span>
+        <svg width="9" height="9" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+          <path d={open ? "M4 10l4-4 4 4" : "M4 6l4 4 4-4"} />
+        </svg>
+      </div>
+      {open && group.items.map(item => (
+        <div key={item.id} onClick={() => onSelect(item.id as Page)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px 7px 26px", margin: "1px 4px", cursor: "pointer", borderRadius: 6, background: activePage === item.id ? C.surface : "transparent", color: activePage === item.id ? C.text : "#585858", fontWeight: activePage === item.id ? 600 : 400, fontSize: 13, borderLeft: activePage === item.id ? `2px solid ${C.accent}` : "2px solid transparent", transition: "all .1s" }}>
+          <Icon name={item.icon} size={13} />
+          {item.label}
+        </div>
+      ))}
     </div>
   );
 }
@@ -2043,22 +2110,21 @@ function App() {
           <div style={T.logoBadge}>Admin Panel</div>
         </div>
 
-        <div style={{ flex: 1, paddingTop: 8 }}>
+        <div style={{ flex: 1, overflowY: "auto" as const, minHeight: 0, paddingTop: 8, paddingBottom: 4 }}>
           {NAV.map(group => (
-            <div key={group.section}>
-              <div style={T.navSection}>{group.section}</div>
-              {group.items.map(item => (
-                <NavItem key={item.id} id={item.id} label={item.label} active={page === item.id} onClick={() => setPage(item.id as Page)} />
-              ))}
-            </div>
+            <NavSection key={group.section} group={group} activePage={page} onSelect={id => setPage(id as Page)} />
           ))}
         </div>
 
-        <div style={{ padding: "8px 8px 4px", borderTop: `1px solid ${C.border}` }}>
-          <NavItem id="faq" label="FAQ & Setup" active={page === "faq"} onClick={() => setPage("faq")} />
-        </div>
-        <div style={{ padding: "8px 16px 16px" }}>
-          <a href="/auth/sign-out" style={{ fontSize: 12, color: C.muted, textDecoration: "none" }}>← Sign out</a>
+        <div style={{ borderTop: `1px solid ${C.border}`, padding: "8px 4px 4px" }}>
+          <div onClick={() => setPage("faq" as Page)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", margin: "1px 0", cursor: "pointer", borderRadius: 6, background: page === "faq" ? C.surface : "transparent", color: page === "faq" ? C.text : "#585858", fontSize: 13, fontWeight: page === "faq" ? 600 : 400 }}>
+            <Icon name="help" size={13} />
+            FAQ & Setup
+          </div>
+          <a href="/auth/sign-out" style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", borderRadius: 6, color: "#585858", fontSize: 13, textDecoration: "none" }}>
+            <Icon name="signout" size={13} />
+            Sign out
+          </a>
         </div>
       </nav>
 
