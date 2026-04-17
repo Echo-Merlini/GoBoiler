@@ -131,6 +131,61 @@ export const settings = pgTable("settings", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
+// ─── API Keys (machine-to-machine auth) ──────────────────
+export const apiKey = pgTable("api_key", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  keyHash: text("key_hash").notNull().unique(), // SHA-256 of the raw key
+  prefix: text("prefix").notNull(),             // first 8 chars shown in UI
+  scopes: text("scopes").notNull().default("*"), // comma-separated or "*"
+  lastUsedAt: timestamp("last_used_at"),
+  expiresAt: timestamp("expires_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// ─── App Logs ────────────────────────────────────────────
+export const appLog = pgTable("app_log", {
+  id: text("id").primaryKey(),
+  level: text("level").notNull(),     // info | warn | error
+  message: text("message").notNull(),
+  source: text("source"),             // e.g. "cron", "push", "billing"
+  meta: text("meta"),                 // JSON string of extra context
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// ─── Push Subscriptions ──────────────────────────────────
+export const pushSubscription = pgTable("push_subscription", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  endpoint: text("endpoint").notNull().unique(),
+  p256dh: text("p256dh").notNull(),
+  auth: text("auth").notNull(),
+  userAgent: text("user_agent"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// ─── Cron Jobs ───────────────────────────────────────────
+export const cronJob = pgTable("cron_job", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  schedule: text("schedule").notNull(),  // cron expression
+  url: text("url").notNull(),            // internal or external endpoint
+  method: text("method").notNull().default("GET"),
+  body: text("body"),                    // optional JSON body
+  headers: text("headers"),             // optional JSON headers
+  enabled: boolean("enabled").notNull().default(true),
+  lastRunAt: timestamp("last_run_at"),
+  lastRunStatus: text("last_run_status"), // "ok" | "error"
+  lastRunMessage: text("last_run_message"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 // ─── Two-Factor Auth (Better Auth twoFactor plugin) ──────
 export const twoFactor = pgTable("two_factor", {
   id: text("id").primaryKey(),

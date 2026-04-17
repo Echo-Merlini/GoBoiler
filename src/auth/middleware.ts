@@ -4,11 +4,12 @@ import { auth } from "@/auth/auth";
 import { db } from "@/db/client";
 import { user } from "@/db/schema";
 import { eq } from "drizzle-orm";
+import { verifyApiKey } from "@/lib/apikeys";
 
 // ─── Require any authenticated session ──────────────────
-// Accepts: Better Auth cookie session OR wallet JWT Bearer token
+// Accepts: Better Auth cookie/bearer session, wallet JWT, or API key (gbk_...)
 export async function requireAuth(c: Context, next: Next) {
-  // 1. Try Better Auth cookie session
+  // 1. Try Better Auth session (cookie or bearer via bearer plugin)
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
   if (session) {
     c.set("session", session.session);
@@ -16,11 +17,23 @@ export async function requireAuth(c: Context, next: Next) {
     return next();
   }
 
-  // 2. Fall back to wallet JWT Bearer token
   const authHeader = c.req.header("Authorization");
   if (authHeader?.startsWith("Bearer ")) {
+    const token = authHeader.slice(7);
+
+    // 2. API key (prefixed gbk_)
+    if (token.startsWith("gbk_")) {
+      const key = await verifyApiKey(token);
+      if (!key) return c.json({ error: "Invalid or expired API key" }, 401);
+      const [u] = await db.select().from(user).where(eq(user.id, key.userId));
+      if (!u) return c.json({ error: "Unauthorized" }, 401);
+      c.set("user", u);
+      c.set("apiKey", key);
+      return next();
+    }
+
+    // 3. Wallet JWT
     try {
-      const token = authHeader.slice(7);
       const payload = await verify(token, process.env.BETTER_AUTH_SECRET!) as { sub: string };
       const [u] = await db.select().from(user).where(eq(user.id, payload.sub));
       if (!u) return c.json({ error: "Unauthorized" }, 401);
@@ -32,6 +45,19 @@ export async function requireAuth(c: Context, next: Next) {
   }
 
   return c.json({ error: "Unauthorized" }, 401);
+}
+
+// ─── Require a specific API key scope ───────────────────
+export function requireScope(scope: string) {
+  return async (c: Context, next: Next) => {
+    const key = c.get("apiKey") as { scopes: string } | undefined;
+    if (!key) return next(); // session auth — skip scope check
+    const scopes = key.scopes.split(",").map(s => s.trim());
+    if (!scopes.includes("*") && !scopes.includes(scope)) {
+      return c.json({ error: `Missing scope: ${scope}` }, 403);
+    }
+    return next();
+  };
 }
 
 // ─── Require a linked wallet on the session user ─────────

@@ -4,13 +4,15 @@ import { siweRoutes } from "@/routes/siwe";
 import { billingRoutes } from "@/routes/billing";
 import { pushRoutes } from "@/routes/push";
 import { meRoutes } from "@/routes/me";
+import { uploadRoutes } from "@/routes/upload";
 import { adminRoutes } from "@/routes/admin";
 
 export const routes = new Hono();
 
-routes.route("/auth", authRoutes);
 routes.route("/auth/siwe", siweRoutes);
+routes.route("/auth", authRoutes);
 routes.route("/billing", billingRoutes);
 routes.route("/push", pushRoutes);
 routes.route("/me", meRoutes);
+routes.route("/upload", uploadRoutes);
 routes.route("/admin", adminRoutes);

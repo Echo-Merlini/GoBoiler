@@ -2,7 +2,7 @@ import { SiweMessage } from "siwe";
 import { verifyMessage } from "viem";
 import { db } from "@/db/client";
 import { siweNonce, user, wallet } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, lt } from "drizzle-orm";
 import { nanoid } from "@/lib/utils";
 
 // ─── Generate a one-time nonce ───────────────────────────
@@ -126,5 +126,5 @@ export async function linkWalletToUser({
 
 // ─── Purge expired nonces (call from a periodic job) ─────
 export async function purgeExpiredNonces() {
-  await db.delete(siweNonce).where(eq(siweNonce.expiresAt, new Date(0)));
+  await db.delete(siweNonce).where(lt(siweNonce.expiresAt, new Date()));
 }

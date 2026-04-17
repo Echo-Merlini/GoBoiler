@@ -16,28 +16,32 @@ export const billingRoutes = new Hono();
 // POST /billing/checkout — create a Stripe checkout session
 billingRoutes.post("/checkout", requireAuth, async (c) => {
   const u = c.get("user") as { id: string; email: string; name: string; stripeCustomerId?: string };
-  const priceId = process.env.STRIPE_PRO_PRICE_ID!;
+  const priceId = process.env.STRIPE_PRO_PRICE_ID;
+  if (!priceId || priceId.includes("xxxx")) return c.json({ error: "Stripe not configured" }, 400);
 
-  const customer = await getOrCreateCustomer({
-    userId: u.id,
-    email: u.email,
-    name: u.name,
-    stripeCustomerId: u.stripeCustomerId,
-  });
+  try {
+    const customer = await getOrCreateCustomer({
+      userId: u.id,
+      email: u.email,
+      name: u.name,
+      stripeCustomerId: u.stripeCustomerId,
+    });
 
-  // Persist customer ID if new
-  if (!u.stripeCustomerId) {
-    await db.update(user).set({ stripeCustomerId: customer.id }).where(eq(user.id, u.id));
+    if (!u.stripeCustomerId) {
+      await db.update(user).set({ stripeCustomerId: customer.id }).where(eq(user.id, u.id));
+    }
+
+    const session = await createCheckoutSession({
+      customerId: customer.id,
+      priceId,
+      successUrl: `${process.env.APP_URL}/billing/success`,
+      cancelUrl: `${process.env.APP_URL}/billing/cancel`,
+    });
+
+    return c.json({ url: session.url });
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500);
   }
-
-  const session = await createCheckoutSession({
-    customerId: customer.id,
-    priceId,
-    successUrl: `${process.env.APP_URL}/billing/success`,
-    cancelUrl: `${process.env.APP_URL}/billing/cancel`,
-  });
-
-  return c.json({ url: session.url });
 });
 
 // POST /billing/portal — customer billing portal
@@ -45,12 +49,15 @@ billingRoutes.post("/portal", requireAuth, async (c) => {
   const u = c.get("user") as { stripeCustomerId?: string };
   if (!u.stripeCustomerId) return c.json({ error: "No billing account" }, 400);
 
-  const portal = await createPortalSession({
-    customerId: u.stripeCustomerId,
-    returnUrl: `${process.env.APP_URL}/settings`,
-  });
-
-  return c.json({ url: portal.url });
+  try {
+    const portal = await createPortalSession({
+      customerId: u.stripeCustomerId,
+      returnUrl: `${process.env.APP_URL}/settings`,
+    });
+    return c.json({ url: portal.url });
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500);
+  }
 });
 
 // POST /billing/webhook — Stripe webhook handler
