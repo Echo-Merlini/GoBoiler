@@ -3,156 +3,159 @@ import { createRoot } from "react-dom/client";
 
 // ─── Types ───────────────────────────────────────────────
 type Plan = "free" | "pro" | "enterprise";
-type User = {
-  id: string; name: string; email: string; plan: Plan;
-  isAdmin: boolean; walletAddress: string | null;
-  stripeCustomerId: string | null; createdAt: string;
-};
-type Session = {
-  id: string; userId: string; userEmail: string; userName: string;
-  expiresAt: string; ipAddress: string | null; userAgent: string | null; createdAt: string;
-};
-type Wallet = {
-  id: string; address: string; chainId: number; isPrimary: boolean;
-  userId: string; userEmail: string; userName: string; createdAt: string;
-};
-type ServiceField = { set: boolean; source: "db" | "env" | "unset"; value: string | null };
+type User = { id: string; name: string; email: string; plan: Plan; isAdmin: boolean; walletAddress: string | null; stripeCustomerId: string | null; createdAt: string };
+type Session = { id: string; userId: string; userEmail: string; userName: string; expiresAt: string; ipAddress: string | null; userAgent: string | null; createdAt: string };
+type Wallet = { id: string; address: string; chainId: number; isPrimary: boolean; userId: string; userEmail: string; userName: string; createdAt: string };
+type Stats = { totalUsers: number; totalSessions: number; totalWallets: number; planCounts: { plan: string; total: number }[] };
+type SF = { set: boolean; source: "db" | "env" | "unset"; value: string | null };
 type Services = {
-  auth:     { googleClientId: ServiceField; googleClientSecret: ServiceField };
-  email:    { resendApiKey: ServiceField; emailFrom: ServiceField };
-  stripe:   { secretKey: ServiceField; webhookSecret: ServiceField; proPriceId: ServiceField; enterprisePriceId: ServiceField };
-  crypto:   { ethRpcUrl: ServiceField; baseRpcUrl: ServiceField; polygonRpcUrl: ServiceField; siweDomain: ServiceField; siweStatement: ServiceField };
-  database: { url: ServiceField };
-};
-type Stats = {
-  totalUsers: number; totalSessions: number; totalWallets: number;
-  planCounts: { plan: string; total: number }[];
+  auth:     { googleClientId: SF; googleClientSecret: SF };
+  email:    { resendApiKey: SF; emailFrom: SF };
+  stripe:   { secretKey: SF; webhookSecret: SF; proPriceId: SF; enterprisePriceId: SF };
+  crypto:   { ethRpcUrl: SF; baseRpcUrl: SF; polygonRpcUrl: SF; siweDomain: SF; siweStatement: SF };
+  database: { url: SF };
 };
 
 // ─── API ─────────────────────────────────────────────────
 async function api<T>(path: string, opts?: RequestInit): Promise<T> {
-  const res = await fetch(`/admin/api${path}`, {
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    ...opts,
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || `HTTP ${res.status}`);
-  }
+  const res = await fetch(`/admin/api${path}`, { credentials: "include", headers: { "Content-Type": "application/json" }, ...opts });
+  if (!res.ok) { const t = await res.text(); throw Object.assign(new Error(t || `HTTP ${res.status}`), { status: res.status }); }
   return res.json();
 }
 
-// ─── Styles ──────────────────────────────────────────────
-const S = {
-  layout: { display: "flex", minHeight: "100vh" } as React.CSSProperties,
-  sidebar: {
-    width: 220, background: "#0f172a", display: "flex", flexDirection: "column" as const,
-    padding: "24px 0", flexShrink: 0,
-  },
-  logo: { padding: "0 20px 24px", borderBottom: "1px solid #1e293b", marginBottom: 8 },
-  logoText: { fontSize: 18, fontWeight: 700, color: "#fff", letterSpacing: -0.5 },
-  logoBadge: { fontSize: 10, color: "#6366f1", fontWeight: 600, letterSpacing: 1, textTransform: "uppercase" as const },
-  navItem: (active: boolean): React.CSSProperties => ({
-    display: "flex", alignItems: "center", gap: 10, padding: "10px 20px",
-    color: active ? "#fff" : "#94a3b8", background: active ? "#1e293b" : "transparent",
-    cursor: "pointer", fontSize: 14, fontWeight: active ? 600 : 400,
-    borderLeft: active ? "3px solid #6366f1" : "3px solid transparent",
-    transition: "all .15s",
+// ─── Theme ───────────────────────────────────────────────
+const C = {
+  bg: "#0f172a", surface: "#1e293b", surface2: "#0f172a",
+  border: "#334155", borderLight: "#1e293b",
+  text: "#f1f5f9", muted: "#64748b", faint: "#94a3b8",
+  accent: "#818cf8", accentDark: "#6366f1",
+  success: "#4ade80", danger: "#f87171", warning: "#fbbf24",
+  inputBg: "#0f172a",
+};
+
+const T: Record<string, React.CSSProperties> = {
+  layout:    { display: "flex", minHeight: "100vh", background: C.bg, color: C.text, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" },
+  sidebar:   { width: 240, background: C.surface2, borderRight: `1px solid ${C.border}`, display: "flex", flexDirection: "column", flexShrink: 0 },
+  logoWrap:  { padding: "24px 20px 20px", borderBottom: `1px solid ${C.border}` },
+  logoText:  { fontSize: 17, fontWeight: 700, color: C.text, letterSpacing: -0.3 },
+  logoBadge: { fontSize: 9, color: C.accent, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase" as const, marginTop: 2 },
+  navSection:{ padding: "16px 12px 4px", fontSize: 10, fontWeight: 700, color: C.muted, letterSpacing: 1.2, textTransform: "uppercase" as const },
+  main:      { flex: 1, padding: "32px 36px", overflowY: "auto" as const },
+  title:     { fontSize: 20, fontWeight: 700, marginBottom: 28, color: C.text },
+  card:      { background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: 24, marginBottom: 20 },
+  grid:      { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 14, marginBottom: 24 },
+  statCard:  { background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: 20 },
+  statVal:   { fontSize: 30, fontWeight: 700, color: C.text },
+  statLbl:   { fontSize: 11, color: C.muted, marginTop: 4, fontWeight: 600, textTransform: "uppercase" as const, letterSpacing: .5 },
+  table:     { width: "100%", borderCollapse: "collapse" as const, fontSize: 13 },
+  th:        { textAlign: "left" as const, padding: "10px 14px", borderBottom: `1px solid ${C.border}`, color: C.muted, fontWeight: 600, fontSize: 11, textTransform: "uppercase" as const, letterSpacing: .5 },
+  td:        { padding: "11px 14px", borderBottom: `1px solid ${C.borderLight}`, verticalAlign: "middle" as const, color: C.text },
+  empty:     { textAlign: "center" as const, padding: 48, color: C.muted, fontSize: 14 },
+  chip:      { display: "inline-block", padding: "2px 8px", borderRadius: 20, fontSize: 11, background: "#1e293b", color: C.faint, border: `1px solid ${C.border}` },
+  // Forms
+  label:     { fontSize: 12, color: C.muted, fontWeight: 600, marginBottom: 6, display: "block" as const },
+  input:     { width: "100%", padding: "9px 12px", background: C.inputBg, border: `1px solid ${C.border}`, borderRadius: 7, color: C.text, fontSize: 13, outline: "none", boxSizing: "border-box" as const },
+  footer:    { display: "flex", gap: 10, marginTop: 24, paddingTop: 20, borderTop: `1px solid ${C.border}` },
+  svcGroup:  { marginBottom: 28 },
+  svcGTitle: { fontSize: 11, fontWeight: 700, color: C.muted, textTransform: "uppercase" as const, letterSpacing: .8, marginBottom: 14 },
+  svcGrid:   { display: "grid", gridTemplateColumns: "200px 1fr", gap: "10px 16px", alignItems: "center" },
+  svcRowLbl: { fontSize: 13, color: C.faint },
+  srcBadge:  (s: string): React.CSSProperties => ({
+    display: "inline-block", padding: "1px 7px", borderRadius: 20, fontSize: 10, fontWeight: 700,
+    background: s === "db" ? "#312e81" : s === "env" ? "#1e3a5f" : "#1e293b",
+    color: s === "db" ? "#a5b4fc" : s === "env" ? "#7dd3fc" : C.muted,
   }),
-  main: { flex: 1, padding: 32, overflowY: "auto" as const },
-  pageTitle: { fontSize: 22, fontWeight: 700, marginBottom: 24, color: "#0f172a" },
-  card: {
-    background: "#fff", borderRadius: 10, border: "1px solid #e2e8f0",
-    padding: 24, marginBottom: 24,
-  },
-  statsGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 16, marginBottom: 24 },
-  statCard: { background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 20 },
-  statValue: { fontSize: 32, fontWeight: 700, color: "#0f172a" },
-  statLabel: { fontSize: 12, color: "#94a3b8", marginTop: 4, fontWeight: 500, textTransform: "uppercase" as const, letterSpacing: .5 },
-  table: { width: "100%", borderCollapse: "collapse" as const, fontSize: 13 },
-  th: { textAlign: "left" as const, padding: "10px 12px", borderBottom: "2px solid #e2e8f0", color: "#64748b", fontWeight: 600, fontSize: 11, textTransform: "uppercase" as const, letterSpacing: .5 },
-  td: { padding: "11px 12px", borderBottom: "1px solid #f1f5f9", verticalAlign: "middle" as const },
-  badge: (plan: string): React.CSSProperties => ({
-    display: "inline-block", padding: "2px 8px", borderRadius: 20, fontSize: 11, fontWeight: 600,
-    background: plan === "enterprise" ? "#ede9fe" : plan === "pro" ? "#dbeafe" : "#f1f5f9",
-    color: plan === "enterprise" ? "#6d28d9" : plan === "pro" ? "#1d4ed8" : "#64748b",
-  }),
-  btn: (variant: "primary" | "danger" | "ghost"): React.CSSProperties => ({
-    padding: "5px 12px", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: "pointer", border: "none",
-    background: variant === "primary" ? "#6366f1" : variant === "danger" ? "#fee2e2" : "#f8fafc",
-    color: variant === "primary" ? "#fff" : variant === "danger" ? "#dc2626" : "#475569",
-    transition: "opacity .15s",
-  }),
-  select: {
-    padding: "4px 8px", borderRadius: 6, border: "1px solid #e2e8f0",
-    fontSize: 12, background: "#fff", cursor: "pointer", color: "#0f172a",
-  } as React.CSSProperties,
-  toast: (type: "ok" | "err"): React.CSSProperties => ({
-    position: "fixed", bottom: 24, right: 24, padding: "12px 20px",
-    background: type === "ok" ? "#0f172a" : "#dc2626",
-    color: "#fff", borderRadius: 8, fontSize: 13, fontWeight: 500,
-    boxShadow: "0 4px 20px rgba(0,0,0,.2)", zIndex: 9999, animation: "fadein .2s",
-  }),
-  empty: { textAlign: "center" as const, padding: 48, color: "#94a3b8", fontSize: 14 },
-  chip: { display: "inline-block", padding: "1px 7px", borderRadius: 20, fontSize: 11, background: "#f1f5f9", color: "#64748b" },
-  svcTabs: { display: "flex", gap: 4, marginBottom: 24, borderBottom: "2px solid #e2e8f0", paddingBottom: 0 },
-  svcTab: (active: boolean): React.CSSProperties => ({
-    padding: "8px 18px", fontSize: 13, fontWeight: 600, cursor: "pointer", border: "none", background: "none",
-    color: active ? "#6366f1" : "#64748b",
-    borderBottom: active ? "2px solid #6366f1" : "2px solid transparent",
-    marginBottom: -2, transition: "all .15s",
-  }),
-  svcGroup: { marginBottom: 28 },
-  svcLabel: { fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase" as const, letterSpacing: .8, marginBottom: 12 },
-  svcRow: { display: "flex", alignItems: "center", gap: 12, marginBottom: 12 },
-  svcRowLabel: { width: 200, fontSize: 13, color: "#475569", flexShrink: 0 },
-  svcInput: { flex: 1, padding: "7px 10px", border: "1px solid #e2e8f0", borderRadius: 6, fontSize: 13, color: "#0f172a", background: "#fff", outline: "none" } as React.CSSProperties,
-  svcBadge: (source: string): React.CSSProperties => ({
-    fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 20, letterSpacing: .4,
-    background: source === "db" ? "#ede9fe" : source === "env" ? "#dbeafe" : "#f1f5f9",
-    color: source === "db" ? "#6d28d9" : source === "env" ? "#1d4ed8" : "#94a3b8",
-  }),
-  svcFooter: { display: "flex", gap: 10, marginTop: 20, paddingTop: 20, borderTop: "1px solid #f1f5f9" },
-  testResult: (ok: boolean): React.CSSProperties => ({
-    marginTop: 12, padding: "10px 14px", borderRadius: 6, fontSize: 13,
-    background: ok ? "#f0fdf4" : "#fef2f2",
-    color: ok ? "#16a34a" : "#dc2626",
-    border: `1px solid ${ok ? "#bbf7d0" : "#fecaca"}`,
+  testBox: (ok: boolean): React.CSSProperties => ({
+    marginTop: 14, padding: "10px 14px", borderRadius: 7, fontSize: 13,
+    background: ok ? "#052e16" : "#2d0a0a",
+    color: ok ? C.success : C.danger,
+    border: `1px solid ${ok ? "#166534" : "#7f1d1d"}`,
   }),
 };
 
-// ─── Toast ───────────────────────────────────────────────
+// ─── Shared helpers ───────────────────────────────────────
+function Btn({ label, variant = "primary", onClick, disabled }: { label: string; variant?: "primary" | "danger" | "ghost"; onClick?: () => void; disabled?: boolean }) {
+  const bg = variant === "primary" ? C.accentDark : variant === "danger" ? "#7f1d1d" : C.surface;
+  const col = variant === "danger" ? C.danger : C.text;
+  return (
+    <button onClick={onClick} disabled={disabled} style={{ padding: "8px 16px", background: bg, color: col, border: `1px solid ${variant === "ghost" ? C.border : "transparent"}`, borderRadius: 7, fontSize: 13, fontWeight: 600, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? .6 : 1 }}>
+      {label}
+    </button>
+  );
+}
+
+function planBadge(plan: string) {
+  const bg = plan === "enterprise" ? "#312e81" : plan === "pro" ? "#1e3a5f" : "#1e293b";
+  const col = plan === "enterprise" ? "#a5b4fc" : plan === "pro" ? "#7dd3fc" : C.muted;
+  return <span style={{ display: "inline-block", padding: "2px 9px", borderRadius: 20, fontSize: 11, fontWeight: 700, background: bg, color: col }}>{plan}</span>;
+}
+
 function Toast({ msg, type, onDone }: { msg: string; type: "ok" | "err"; onDone: () => void }) {
   useEffect(() => { const t = setTimeout(onDone, 3000); return () => clearTimeout(t); }, []);
-  return <div style={S.toast(type)}>{msg}</div>;
+  return <div style={{ position: "fixed", bottom: 24, right: 24, padding: "12px 20px", background: type === "ok" ? "#1e293b" : "#7f1d1d", color: type === "ok" ? C.text : C.danger, border: `1px solid ${type === "ok" ? C.border : "#991b1b"}`, borderRadius: 8, fontSize: 13, fontWeight: 500, boxShadow: "0 8px 30px rgba(0,0,0,.4)", zIndex: 9999 }}>{msg}</div>;
+}
+
+// ─── Login ───────────────────────────────────────────────
+function Login({ onSuccess }: { onSuccess: () => void }) {
+  const [email, setEmail] = useState("");
+  const [pass, setPass] = useState("");
+  const [err, setErr] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault(); setErr(""); setLoading(true);
+    try {
+      const res = await fetch("/auth/sign-in/email", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password: pass }) });
+      if (!res.ok) { const d: any = await res.json(); throw new Error(d.message || "Invalid credentials"); }
+      onSuccess();
+    } catch (e: any) { setErr(e.message); }
+    setLoading(false);
+  };
+
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: C.bg }}>
+      <div style={{ width: 380, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: 36 }}>
+        <div style={{ marginBottom: 28 }}>
+          <div style={{ fontSize: 20, fontWeight: 700, color: C.text }}>GoBoiler</div>
+          <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>Sign in to admin panel</div>
+        </div>
+        <form onSubmit={submit}>
+          <div style={{ marginBottom: 16 }}>
+            <label style={T.label}>Email</label>
+            <input style={T.input} type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="admin@example.com" autoFocus />
+          </div>
+          <div style={{ marginBottom: 24 }}>
+            <label style={T.label}>Password</label>
+            <input style={T.input} type="password" value={pass} onChange={e => setPass(e.target.value)} placeholder="••••••••" />
+          </div>
+          {err && <div style={{ color: C.danger, fontSize: 13, marginBottom: 14 }}>{err}</div>}
+          <button type="submit" disabled={loading} style={{ width: "100%", padding: "10px", background: C.accentDark, color: "#fff", border: "none", borderRadius: 7, fontSize: 14, fontWeight: 600, cursor: "pointer", opacity: loading ? .7 : 1 }}>
+            {loading ? "Signing in…" : "Sign in"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
 }
 
 // ─── Dashboard ───────────────────────────────────────────
 function Dashboard() {
   const [stats, setStats] = useState<Stats | null>(null);
   useEffect(() => { api<Stats>("/stats").then(setStats).catch(() => {}); }, []);
-
-  const planMap = Object.fromEntries((stats?.planCounts ?? []).map(p => [p.plan, p.total]));
+  const pm = Object.fromEntries((stats?.planCounts ?? []).map(p => [p.plan, p.total]));
   const cards = [
     { label: "Total Users", value: stats?.totalUsers ?? "—" },
     { label: "Active Sessions", value: stats?.totalSessions ?? "—" },
     { label: "Linked Wallets", value: stats?.totalWallets ?? "—" },
-    { label: "Free", value: planMap.free ?? 0 },
-    { label: "Pro", value: planMap.pro ?? 0 },
-    { label: "Enterprise", value: planMap.enterprise ?? 0 },
+    { label: "Free", value: pm.free ?? 0 },
+    { label: "Pro", value: pm.pro ?? 0 },
+    { label: "Enterprise", value: pm.enterprise ?? 0 },
   ];
-
   return (
     <>
-      <div style={S.pageTitle}>Dashboard</div>
-      <div style={S.statsGrid}>
-        {cards.map(c => (
-          <div key={c.label} style={S.statCard}>
-            <div style={S.statValue}>{c.value}</div>
-            <div style={S.statLabel}>{c.label}</div>
-          </div>
-        ))}
+      <div style={T.title}>Dashboard</div>
+      <div style={T.grid}>
+        {cards.map(c => <div key={c.label} style={T.statCard}><div style={T.statVal}>{c.value}</div><div style={T.statLbl}>{c.label}</div></div>)}
       </div>
     </>
   );
@@ -162,82 +165,39 @@ function Dashboard() {
 function Users({ toast }: { toast: (m: string, t?: "ok" | "err") => void }) {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
-
-  const load = useCallback(() => {
-    setLoading(true);
-    api<User[]>("/users").then(u => { setUsers(u); setLoading(false); }).catch(() => setLoading(false));
-  }, []);
-
-  useEffect(() => { load(); }, []);
+  useEffect(() => { api<User[]>("/users").then(u => { setUsers(u); setLoading(false); }).catch(() => setLoading(false)); }, []);
 
   const patch = async (id: string, data: Partial<User>) => {
-    try {
-      await api(`/users/${id}`, { method: "PATCH", body: JSON.stringify(data) });
-      setUsers(prev => prev.map(u => u.id === id ? { ...u, ...data } : u));
-      toast("Updated");
-    } catch (e: any) { toast(e.message, "err"); }
+    try { await api(`/users/${id}`, { method: "PATCH", body: JSON.stringify(data) }); setUsers(p => p.map(u => u.id === id ? { ...u, ...data } : u)); toast("Saved"); }
+    catch (e: any) { toast(e.message, "err"); }
   };
-
   const del = async (id: string, email: string) => {
-    if (!confirm(`Delete ${email}? This cannot be undone.`)) return;
-    try {
-      await api(`/users/${id}`, { method: "DELETE" });
-      setUsers(prev => prev.filter(u => u.id !== id));
-      toast("User deleted");
-    } catch (e: any) { toast(e.message, "err"); }
+    if (!confirm(`Delete ${email}?`)) return;
+    try { await api(`/users/${id}`, { method: "DELETE" }); setUsers(p => p.filter(u => u.id !== id)); toast("Deleted"); }
+    catch (e: any) { toast(e.message, "err"); }
   };
 
   return (
     <>
-      <div style={S.pageTitle}>Users <span style={{ fontSize: 14, fontWeight: 400, color: "#94a3b8" }}>({users.length})</span></div>
-      <div style={S.card}>
-        {loading ? <div style={S.empty}>Loading…</div> : users.length === 0 ? <div style={S.empty}>No users</div> : (
-          <table style={S.table}>
-            <thead>
-              <tr>
-                {["Name", "Email", "Plan", "Admin", "Wallet", "Stripe", "Joined", ""].map(h => (
-                  <th key={h} style={S.th}>{h}</th>
-                ))}
-              </tr>
-            </thead>
+      <div style={T.title}>Users <span style={{ fontSize: 14, fontWeight: 400, color: C.muted }}>({users.length})</span></div>
+      <div style={T.card}>
+        {loading ? <div style={T.empty}>Loading…</div> : !users.length ? <div style={T.empty}>No users yet</div> : (
+          <table style={T.table}>
+            <thead><tr>{["Name","Email","Plan","Admin","Wallet","Joined",""].map(h => <th key={h} style={T.th}>{h}</th>)}</tr></thead>
             <tbody>
               {users.map(u => (
                 <tr key={u.id}>
-                  <td style={S.td}>{u.name}</td>
-                  <td style={S.td}>{u.email}</td>
-                  <td style={S.td}>
-                    <select
-                      style={S.select}
-                      value={u.plan}
-                      onChange={e => patch(u.id, { plan: e.target.value as Plan })}
-                    >
-                      <option value="free">Free</option>
-                      <option value="pro">Pro</option>
-                      <option value="enterprise">Enterprise</option>
+                  <td style={T.td}>{u.name}</td>
+                  <td style={T.td}><span style={{ color: C.faint }}>{u.email}</span></td>
+                  <td style={T.td}>
+                    <select value={u.plan} onChange={e => patch(u.id, { plan: e.target.value as Plan })} style={{ background: C.inputBg, border: `1px solid ${C.border}`, color: C.text, borderRadius: 6, padding: "4px 8px", fontSize: 12, cursor: "pointer" }}>
+                      <option value="free">Free</option><option value="pro">Pro</option><option value="enterprise">Enterprise</option>
                     </select>
                   </td>
-                  <td style={S.td}>
-                    <input
-                      type="checkbox"
-                      checked={u.isAdmin}
-                      onChange={e => patch(u.id, { isAdmin: e.target.checked })}
-                      style={{ cursor: "pointer" }}
-                    />
-                  </td>
-                  <td style={S.td}>
-                    {u.walletAddress
-                      ? <span style={S.chip} title={u.walletAddress}>{u.walletAddress.slice(0, 6)}…{u.walletAddress.slice(-4)}</span>
-                      : <span style={{ color: "#cbd5e1" }}>—</span>}
-                  </td>
-                  <td style={S.td}>
-                    {u.stripeCustomerId
-                      ? <span style={S.chip}>{u.stripeCustomerId.slice(0, 12)}…</span>
-                      : <span style={{ color: "#cbd5e1" }}>—</span>}
-                  </td>
-                  <td style={S.td}>{new Date(u.createdAt).toLocaleDateString()}</td>
-                  <td style={S.td}>
-                    <button style={S.btn("danger")} onClick={() => del(u.id, u.email)}>Delete</button>
-                  </td>
+                  <td style={T.td}><input type="checkbox" checked={u.isAdmin} onChange={e => patch(u.id, { isAdmin: e.target.checked })} style={{ cursor: "pointer", accentColor: C.accent }} /></td>
+                  <td style={T.td}>{u.walletAddress ? <span style={T.chip}>{u.walletAddress.slice(0,6)}…{u.walletAddress.slice(-4)}</span> : <span style={{ color: C.border }}>—</span>}</td>
+                  <td style={{ ...T.td, color: C.muted }}>{new Date(u.createdAt).toLocaleDateString()}</td>
+                  <td style={T.td}><Btn label="Delete" variant="danger" onClick={() => del(u.id, u.email)} /></td>
                 </tr>
               ))}
             </tbody>
@@ -252,53 +212,32 @@ function Users({ toast }: { toast: (m: string, t?: "ok" | "err") => void }) {
 function Sessions({ toast }: { toast: (m: string, t?: "ok" | "err") => void }) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    api<Session[]>("/sessions").then(s => { setSessions(s); setLoading(false); }).catch(() => setLoading(false));
-  }, []);
-
+  useEffect(() => { api<Session[]>("/sessions").then(s => { setSessions(s); setLoading(false); }).catch(() => setLoading(false)); }, []);
   const revoke = async (id: string) => {
-    try {
-      await api(`/sessions/${id}`, { method: "DELETE" });
-      setSessions(prev => prev.filter(s => s.id !== id));
-      toast("Session revoked");
-    } catch (e: any) { toast(e.message, "err"); }
+    try { await api(`/sessions/${id}`, { method: "DELETE" }); setSessions(p => p.filter(s => s.id !== id)); toast("Revoked"); }
+    catch (e: any) { toast(e.message, "err"); }
   };
-
-  const isExpired = (d: string) => new Date(d) < new Date();
-
   return (
     <>
-      <div style={S.pageTitle}>Sessions <span style={{ fontSize: 14, fontWeight: 400, color: "#94a3b8" }}>({sessions.length})</span></div>
-      <div style={S.card}>
-        {loading ? <div style={S.empty}>Loading…</div> : sessions.length === 0 ? <div style={S.empty}>No sessions</div> : (
-          <table style={S.table}>
-            <thead>
-              <tr>
-                {["User", "Email", "IP", "User Agent", "Expires", ""].map(h => (
-                  <th key={h} style={S.th}>{h}</th>
-                ))}
-              </tr>
-            </thead>
+      <div style={T.title}>Sessions <span style={{ fontSize: 14, fontWeight: 400, color: C.muted }}>({sessions.length})</span></div>
+      <div style={T.card}>
+        {loading ? <div style={T.empty}>Loading…</div> : !sessions.length ? <div style={T.empty}>No active sessions</div> : (
+          <table style={T.table}>
+            <thead><tr>{["User","Email","IP","User Agent","Expires",""].map(h => <th key={h} style={T.th}>{h}</th>)}</tr></thead>
             <tbody>
-              {sessions.map(s => (
-                <tr key={s.id}>
-                  <td style={S.td}>{s.userName}</td>
-                  <td style={S.td}>{s.userEmail}</td>
-                  <td style={S.td}>{s.ipAddress ?? "—"}</td>
-                  <td style={S.td} title={s.userAgent ?? ""}>
-                    {s.userAgent ? s.userAgent.slice(0, 40) + (s.userAgent.length > 40 ? "…" : "") : "—"}
-                  </td>
-                  <td style={S.td}>
-                    <span style={{ color: isExpired(s.expiresAt) ? "#dc2626" : "#16a34a", fontWeight: 500 }}>
-                      {isExpired(s.expiresAt) ? "Expired" : new Date(s.expiresAt).toLocaleDateString()}
-                    </span>
-                  </td>
-                  <td style={S.td}>
-                    <button style={S.btn("danger")} onClick={() => revoke(s.id)}>Revoke</button>
-                  </td>
-                </tr>
-              ))}
+              {sessions.map(s => {
+                const expired = new Date(s.expiresAt) < new Date();
+                return (
+                  <tr key={s.id}>
+                    <td style={T.td}>{s.userName}</td>
+                    <td style={{ ...T.td, color: C.faint }}>{s.userEmail}</td>
+                    <td style={{ ...T.td, color: C.muted }}>{s.ipAddress ?? "—"}</td>
+                    <td style={{ ...T.td, color: C.muted }}>{s.userAgent ? s.userAgent.slice(0,40) + (s.userAgent.length > 40 ? "…" : "") : "—"}</td>
+                    <td style={T.td}><span style={{ color: expired ? C.danger : C.success, fontWeight: 500 }}>{expired ? "Expired" : new Date(s.expiresAt).toLocaleDateString()}</span></td>
+                    <td style={T.td}><Btn label="Revoke" variant="danger" onClick={() => revoke(s.id)} /></td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
@@ -311,37 +250,23 @@ function Sessions({ toast }: { toast: (m: string, t?: "ok" | "err") => void }) {
 function Wallets() {
   const [wallets, setWallets] = useState<Wallet[]>([]);
   const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    api<Wallet[]>("/wallets").then(w => { setWallets(w); setLoading(false); }).catch(() => setLoading(false));
-  }, []);
-
+  useEffect(() => { api<Wallet[]>("/wallets").then(w => { setWallets(w); setLoading(false); }).catch(() => setLoading(false)); }, []);
   return (
     <>
-      <div style={S.pageTitle}>Wallets <span style={{ fontSize: 14, fontWeight: 400, color: "#94a3b8" }}>({wallets.length})</span></div>
-      <div style={S.card}>
-        {loading ? <div style={S.empty}>Loading…</div> : wallets.length === 0 ? <div style={S.empty}>No linked wallets</div> : (
-          <table style={S.table}>
-            <thead>
-              <tr>
-                {["Address", "Chain", "Primary", "User", "Email", "Linked"].map(h => (
-                  <th key={h} style={S.th}>{h}</th>
-                ))}
-              </tr>
-            </thead>
+      <div style={T.title}>Wallets <span style={{ fontSize: 14, fontWeight: 400, color: C.muted }}>({wallets.length})</span></div>
+      <div style={T.card}>
+        {loading ? <div style={T.empty}>Loading…</div> : !wallets.length ? <div style={T.empty}>No linked wallets</div> : (
+          <table style={T.table}>
+            <thead><tr>{["Address","Chain","Primary","User","Email","Linked"].map(h => <th key={h} style={T.th}>{h}</th>)}</tr></thead>
             <tbody>
               {wallets.map(w => (
                 <tr key={w.id}>
-                  <td style={S.td}>
-                    <span style={{ fontFamily: "monospace", fontSize: 12 }}>
-                      {w.address.slice(0, 8)}…{w.address.slice(-6)}
-                    </span>
-                  </td>
-                  <td style={S.td}><span style={S.chip}>Chain {w.chainId}</span></td>
-                  <td style={S.td}>{w.isPrimary ? "✓" : ""}</td>
-                  <td style={S.td}>{w.userName}</td>
-                  <td style={S.td}>{w.userEmail}</td>
-                  <td style={S.td}>{new Date(w.createdAt).toLocaleDateString()}</td>
+                  <td style={T.td}><span style={{ fontFamily: "monospace", fontSize: 12, color: C.faint }}>{w.address.slice(0,8)}…{w.address.slice(-6)}</span></td>
+                  <td style={T.td}><span style={T.chip}>Chain {w.chainId}</span></td>
+                  <td style={T.td}>{w.isPrimary ? <span style={{ color: C.success }}>✓</span> : <span style={{ color: C.border }}>—</span>}</td>
+                  <td style={T.td}>{w.userName}</td>
+                  <td style={{ ...T.td, color: C.faint }}>{w.userEmail}</td>
+                  <td style={{ ...T.td, color: C.muted }}>{new Date(w.createdAt).toLocaleDateString()}</td>
                 </tr>
               ))}
             </tbody>
@@ -352,248 +277,230 @@ function Wallets() {
   );
 }
 
-// ─── Services ────────────────────────────────────────────
-const SVC_TABS = ["Auth", "Email", "Stripe", "Crypto", "Database"] as const;
-type SvcTab = typeof SVC_TABS[number];
+// ─── Service page ─────────────────────────────────────────
+const SVC_META: Record<string, { title: string; desc: string; link?: string; linkLabel?: string; testLabel?: string; testKey?: string; fields: { key: string; label: string; dbKey: string; sensitive?: boolean }[] }> = {
+  auth: {
+    title: "Authentication — Google OAuth",
+    desc: "Enable Google sign-in. Create OAuth credentials in Google Cloud Console and add your redirect URI.",
+    link: "https://console.cloud.google.com/apis/credentials", linkLabel: "Open Google Cloud Console",
+    fields: [
+      { key: "googleClientId",     label: "Client ID",     dbKey: "google_client_id" },
+      { key: "googleClientSecret", label: "Client Secret", dbKey: "google_client_secret", sensitive: true },
+    ],
+  },
+  email: {
+    title: "Email — Resend",
+    desc: "Transactional emails for verification, password reset, magic links, and invoices. Domain must be verified.",
+    link: "https://resend.com/api-keys", linkLabel: "Resend Dashboard",
+    testLabel: "Send test email", testKey: "email",
+    fields: [
+      { key: "resendApiKey", label: "API Key",    dbKey: "resend_api_key", sensitive: true },
+      { key: "emailFrom",   label: "From Email", dbKey: "email_from" },
+    ],
+  },
+  stripe: {
+    title: "Billing — Stripe",
+    desc: "Subscription billing, checkout sessions, and customer portal. Use test keys for development.",
+    link: "https://dashboard.stripe.com/apikeys", linkLabel: "Stripe Dashboard",
+    testLabel: "Test connection", testKey: "stripe",
+    fields: [
+      { key: "secretKey",           label: "Secret Key",          dbKey: "stripe_secret_key",          sensitive: true },
+      { key: "webhookSecret",       label: "Webhook Secret",      dbKey: "stripe_webhook_secret",      sensitive: true },
+      { key: "proPriceId",          label: "Pro Price ID",        dbKey: "stripe_pro_price_id" },
+      { key: "enterprisePriceId",   label: "Enterprise Price ID", dbKey: "stripe_enterprise_price_id" },
+    ],
+  },
+  crypto: {
+    title: "Crypto — RPC & SIWE",
+    desc: "JSON-RPC endpoints for on-chain reads, token gating, and ENS resolution. SIWE config for wallet login.",
+    link: "https://www.alchemy.com", linkLabel: "Get RPC keys at Alchemy",
+    testLabel: "Test ETH RPC", testKey: "crypto",
+    fields: [
+      { key: "ethRpcUrl",     label: "Ethereum RPC",  dbKey: "eth_rpc_url" },
+      { key: "baseRpcUrl",    label: "Base RPC",      dbKey: "base_rpc_url" },
+      { key: "polygonRpcUrl", label: "Polygon RPC",   dbKey: "polygon_rpc_url" },
+      { key: "siweDomain",    label: "SIWE Domain",   dbKey: "siwe_domain" },
+      { key: "siweStatement", label: "SIWE Statement",dbKey: "siwe_statement" },
+    ],
+  },
+  database: {
+    title: "Database — PostgreSQL",
+    desc: "Postgres-compatible connection string. Supports Supabase, Neon, Railway, and direct Postgres. Restart required for URL changes.",
+    testLabel: "Ping database", testKey: "database",
+    fields: [
+      { key: "url", label: "Connection URL", dbKey: "database_url", sensitive: true },
+    ],
+  },
+};
 
-function FieldRow({ label, fieldKey, field, edits, setEdits }: {
-  label: string; fieldKey: string;
-  field: ServiceField;
-  edits: Record<string, string>;
-  setEdits: React.Dispatch<React.SetStateAction<Record<string, string>>>;
-}) {
-  const val = edits[fieldKey] !== undefined ? edits[fieldKey] : (field.value ?? "");
-  return (
-    <div style={S.svcRow}>
-      <div style={S.svcRowLabel}>{label}</div>
-      <input
-        style={S.svcInput}
-        type="text"
-        placeholder={field.set ? "●●●●●●●● (leave blank to keep)" : "Not configured"}
-        value={val}
-        onChange={e => setEdits(p => ({ ...p, [fieldKey]: e.target.value }))}
-      />
-      <span style={S.svcBadge(field.source)}>{field.source}</span>
-    </div>
-  );
-}
-
-function ServiceSection({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div style={S.svcGroup}>
-      <div style={S.svcLabel}>{title}</div>
-      {children}
-    </div>
-  );
-}
-
-function Services({ toast }: { toast: (m: string, t?: "ok" | "err") => void }) {
-  const [tab, setTab] = useState<SvcTab>("Auth");
-  const [svc, setSvc] = useState<Services | null>(null);
+function ServicePage({ svcId, toast }: { svcId: string; toast: (m: string, t?: "ok" | "err") => void }) {
+  const meta = SVC_META[svcId];
+  const [svcData, setSvcData] = useState<any>(null);
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
 
   useEffect(() => {
-    api<Services>("/services").then(setSvc).catch(() => {});
-  }, []);
-
-  useEffect(() => { setEdits({}); setTestResult(null); }, [tab]);
+    setEdits({}); setTestResult(null);
+    api<Services>("/services").then(s => setSvcData((s as any)[svcId])).catch(() => {});
+  }, [svcId]);
 
   const save = async () => {
     const payload: Record<string, string> = {};
-    // Map camelCase edits back to snake_case keys
-    const keyMap: Record<string, string> = {
-      googleClientId: "google_client_id", googleClientSecret: "google_client_secret",
-      resendApiKey: "resend_api_key", emailFrom: "email_from",
-      secretKey: "stripe_secret_key", webhookSecret: "stripe_webhook_secret",
-      proPriceId: "stripe_pro_price_id", enterprisePriceId: "stripe_enterprise_price_id",
-      ethRpcUrl: "eth_rpc_url", baseRpcUrl: "base_rpc_url", polygonRpcUrl: "polygon_rpc_url",
-      siweDomain: "siwe_domain", siweStatement: "siwe_statement",
-      url: "database_url",
-    };
-    for (const [k, v] of Object.entries(edits)) {
-      if (keyMap[k] && v !== "") payload[keyMap[k]] = v;
+    for (const f of meta.fields) {
+      const v = edits[f.key];
+      if (v !== undefined && v !== "") payload[f.dbKey] = v;
     }
     if (!Object.keys(payload).length) return;
     setSaving(true);
     try {
       await api("/services", { method: "PATCH", body: JSON.stringify(payload) });
       const fresh = await api<Services>("/services");
-      setSvc(fresh);
+      setSvcData((fresh as any)[svcId]);
       setEdits({});
       toast("Saved");
     } catch (e: any) { toast(e.message, "err"); }
     setSaving(false);
   };
 
-  const test = async (service: string) => {
+  const test = async () => {
+    if (!meta.testKey) return;
     setTesting(true); setTestResult(null);
-    try {
-      const res = await api<{ ok: boolean; message: string }>(`/services/test/${service}`);
-      setTestResult(res);
-    } catch (e: any) { setTestResult({ ok: false, message: e.message }); }
+    try { const r = await api<{ ok: boolean; message: string }>(`/services/test/${meta.testKey}`); setTestResult(r); }
+    catch (e: any) { setTestResult({ ok: false, message: e.message }); }
     setTesting(false);
   };
 
-  if (!svc) return <div style={S.empty}>Loading…</div>;
+  if (!svcData) return <div style={T.empty}>Loading…</div>;
 
-  const hasEdits = Object.values(edits).some(v => v !== "");
+  const hasEdits = meta.fields.some(f => edits[f.key] !== undefined && edits[f.key] !== "");
 
   return (
     <>
-      <div style={S.pageTitle}>Services</div>
-      <div style={S.svcTabs}>
-        {SVC_TABS.map(t => <button key={t} style={S.svcTab(tab === t)} onClick={() => setTab(t)}>{t}</button>)}
-      </div>
+      <div style={T.title}>{meta.title}</div>
+      <div style={T.card}>
+        <p style={{ fontSize: 13, color: C.faint, marginBottom: 24, lineHeight: 1.6 }}>{meta.desc}</p>
 
-      <div style={S.card}>
-        {tab === "Auth" && (
-          <>
-            <ServiceSection title="Google OAuth">
-              <FieldRow label="Client ID"     fieldKey="googleClientId"     field={svc.auth.googleClientId}     edits={edits} setEdits={setEdits} />
-              <FieldRow label="Client Secret" fieldKey="googleClientSecret" field={svc.auth.googleClientSecret} edits={edits} setEdits={setEdits} />
-            </ServiceSection>
-            <div style={{ fontSize: 12, color: "#94a3b8" }}>
-              Get credentials at <a href="https://console.cloud.google.com/apis/credentials" target="_blank" style={{ color: "#6366f1" }}>Google Cloud Console</a>. Add <code>http://localhost:3000/auth/callback/google</code> as an authorised redirect URI.
-            </div>
-          </>
-        )}
+        <div style={T.svcGroup}>
+          {meta.fields.map(f => {
+            const field: SF = svcData[f.key];
+            const val = edits[f.key] !== undefined ? edits[f.key] : (field?.value ?? "");
+            return (
+              <div key={f.key} style={{ marginBottom: 16 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                  <label style={{ ...T.label, marginBottom: 0 }}>{f.label}</label>
+                  <span style={T.srcBadge(field?.source ?? "unset")}>{field?.source ?? "unset"}</span>
+                </div>
+                <input
+                  style={T.input}
+                  type="text"
+                  placeholder={field?.set ? (f.sensitive ? "●●●●●●●● (leave blank to keep)" : field.value ?? "") : "Not configured"}
+                  value={val}
+                  onChange={e => setEdits(p => ({ ...p, [f.key]: e.target.value }))}
+                />
+              </div>
+            );
+          })}
+        </div>
 
-        {tab === "Email" && (
-          <>
-            <ServiceSection title="Resend">
-              <FieldRow label="API Key"    fieldKey="resendApiKey" field={svc.email.resendApiKey} edits={edits} setEdits={setEdits} />
-              <FieldRow label="From Email" fieldKey="emailFrom"    field={svc.email.emailFrom}    edits={edits} setEdits={setEdits} />
-            </ServiceSection>
-            <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 8 }}>
-              Get your API key at <a href="https://resend.com/api-keys" target="_blank" style={{ color: "#6366f1" }}>resend.com/api-keys</a>. Domain must be verified to send from custom addresses.
-            </div>
-            {testResult && <div style={S.testResult(testResult.ok)}>{testResult.ok ? "✓" : "✗"} {testResult.message}</div>}
-          </>
-        )}
+        {testResult && <div style={T.testBox(testResult.ok)}>{testResult.ok ? "✓" : "✗"} {testResult.message}</div>}
 
-        {tab === "Stripe" && (
-          <>
-            <ServiceSection title="Keys">
-              <FieldRow label="Secret Key"      fieldKey="secretKey"      field={svc.stripe.secretKey}      edits={edits} setEdits={setEdits} />
-              <FieldRow label="Webhook Secret"  fieldKey="webhookSecret"  field={svc.stripe.webhookSecret}  edits={edits} setEdits={setEdits} />
-            </ServiceSection>
-            <ServiceSection title="Price IDs">
-              <FieldRow label="Pro Plan"        fieldKey="proPriceId"        field={svc.stripe.proPriceId}        edits={edits} setEdits={setEdits} />
-              <FieldRow label="Enterprise Plan" fieldKey="enterprisePriceId" field={svc.stripe.enterprisePriceId} edits={edits} setEdits={setEdits} />
-            </ServiceSection>
-            <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 8 }}>
-              Get keys at <a href="https://dashboard.stripe.com/apikeys" target="_blank" style={{ color: "#6366f1" }}>dashboard.stripe.com/apikeys</a>. For local testing use <code>stripe listen --forward-to localhost:3000/billing/webhook</code>.
-            </div>
-            {testResult && <div style={S.testResult(testResult.ok)}>{testResult.ok ? "✓" : "✗"} {testResult.message}</div>}
-          </>
-        )}
-
-        {tab === "Crypto" && (
-          <>
-            <ServiceSection title="RPC Endpoints">
-              <FieldRow label="Ethereum"    fieldKey="ethRpcUrl"     field={svc.crypto.ethRpcUrl}     edits={edits} setEdits={setEdits} />
-              <FieldRow label="Base"        fieldKey="baseRpcUrl"    field={svc.crypto.baseRpcUrl}    edits={edits} setEdits={setEdits} />
-              <FieldRow label="Polygon"     fieldKey="polygonRpcUrl" field={svc.crypto.polygonRpcUrl} edits={edits} setEdits={setEdits} />
-            </ServiceSection>
-            <ServiceSection title="SIWE">
-              <FieldRow label="Domain"    fieldKey="siweDomain"    field={svc.crypto.siweDomain}    edits={edits} setEdits={setEdits} />
-              <FieldRow label="Statement" fieldKey="siweStatement" field={svc.crypto.siweStatement} edits={edits} setEdits={setEdits} />
-            </ServiceSection>
-            <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 8 }}>
-              Get RPC URLs at <a href="https://www.alchemy.com" target="_blank" style={{ color: "#6366f1" }}>Alchemy</a> or <a href="https://www.infura.io" target="_blank" style={{ color: "#6366f1" }}>Infura</a>.
-            </div>
-            {testResult && <div style={S.testResult(testResult.ok)}>{testResult.ok ? "✓" : "✗"} {testResult.message}</div>}
-          </>
-        )}
-
-        {tab === "Database" && (
-          <>
-            <ServiceSection title="Connection">
-              <FieldRow label="Database URL" fieldKey="url" field={svc.database.url} edits={edits} setEdits={setEdits} />
-            </ServiceSection>
-            <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 8 }}>
-              Supports any Postgres-compatible URL. Supabase, Neon, Railway, PlanetScale (via proxy). Restart required for DB URL changes to fully take effect.
-            </div>
-            {testResult && <div style={S.testResult(testResult.ok)}>{testResult.ok ? "✓" : "✗"} {testResult.message}</div>}
-          </>
-        )}
-
-        <div style={S.svcFooter}>
-          {hasEdits && (
-            <button style={S.btn("primary")} onClick={save} disabled={saving}>
-              {saving ? "Saving…" : "Save changes"}
-            </button>
-          )}
-          {tab === "Email"    && <button style={S.btn("ghost")} onClick={() => test("email")}    disabled={testing}>{testing ? "Testing…" : "Send test email"}</button>}
-          {tab === "Stripe"   && <button style={S.btn("ghost")} onClick={() => test("stripe")}   disabled={testing}>{testing ? "Testing…" : "Test Stripe connection"}</button>}
-          {tab === "Crypto"   && <button style={S.btn("ghost")} onClick={() => test("crypto")}   disabled={testing}>{testing ? "Testing…" : "Test ETH RPC"}</button>}
-          {tab === "Database" && <button style={S.btn("ghost")} onClick={() => test("database")} disabled={testing}>{testing ? "Testing…" : "Ping database"}</button>}
+        <div style={T.footer}>
+          {hasEdits && <Btn label={saving ? "Saving…" : "Save changes"} onClick={save} disabled={saving} />}
+          {meta.testLabel && <Btn label={testing ? "Testing…" : meta.testLabel} variant="ghost" onClick={test} disabled={testing} />}
+          {meta.link && <a href={meta.link} target="_blank" style={{ fontSize: 13, color: C.accent, textDecoration: "none", alignSelf: "center", marginLeft: "auto" }}>↗ {meta.linkLabel}</a>}
         </div>
       </div>
     </>
   );
 }
 
-// ─── App ─────────────────────────────────────────────────
-const PAGES = [
-  { id: "dashboard", label: "Dashboard", icon: "⬛" },
-  { id: "users",     label: "Users",     icon: "👤" },
-  { id: "sessions",  label: "Sessions",  icon: "🔑" },
-  { id: "wallets",   label: "Wallets",   icon: "🔗" },
-  { id: "services",  label: "Services",  icon: "⚙️" },
+// ─── Sidebar ─────────────────────────────────────────────
+type Page = "dashboard" | "users" | "sessions" | "wallets" | "svc:auth" | "svc:email" | "svc:stripe" | "svc:crypto" | "svc:database";
+
+const NAV = [
+  { section: "General", items: [
+    { id: "dashboard", label: "Dashboard" },
+    { id: "users",     label: "Users" },
+    { id: "sessions",  label: "Sessions" },
+    { id: "wallets",   label: "Wallets" },
+  ]},
+  { section: "Services", items: [
+    { id: "svc:auth",     label: "Auth" },
+    { id: "svc:email",    label: "Email" },
+    { id: "svc:stripe",   label: "Stripe" },
+    { id: "svc:crypto",   label: "Crypto" },
+    { id: "svc:database", label: "Database" },
+  ]},
 ];
 
-function App() {
-  const [page, setPage] = useState("dashboard");
-  const [toastMsg, setToastMsg] = useState<{ msg: string; type: "ok" | "err" } | null>(null);
+function NavItem({ id, label, active, onClick }: { id: string; label: string; active: boolean; onClick: () => void }) {
+  return (
+    <div onClick={onClick} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 16px", cursor: "pointer", borderRadius: 7, margin: "1px 8px", background: active ? C.surface : "transparent", color: active ? C.text : C.muted, fontWeight: active ? 600 : 400, fontSize: 13, borderLeft: active ? `3px solid ${C.accent}` : "3px solid transparent", transition: "all .12s" }}>
+      {label}
+    </div>
+  );
+}
 
-  const toast = (msg: string, type: "ok" | "err" = "ok") => setToastMsg({ msg, type });
+// ─── App ─────────────────────────────────────────────────
+type AppState = "loading" | "login" | "app";
+
+function App() {
+  const [state, setState] = useState<AppState>("loading");
+  const [page, setPage] = useState<Page>("dashboard");
+  const [toast, setToast] = useState<{ msg: string; type: "ok" | "err" } | null>(null);
+
+  const check = useCallback(() => {
+    api<Stats>("/stats")
+      .then(() => setState("app"))
+      .catch((e: any) => setState(e.status === 401 || e.status === 403 ? "login" : "app"));
+  }, []);
+
+  useEffect(() => { check(); }, []);
+
+  const showToast = (msg: string, type: "ok" | "err" = "ok") => setToast({ msg, type });
+
+  if (state === "loading") return <div style={{ ...T.layout, alignItems: "center", justifyContent: "center" }}><span style={{ color: C.muted }}>Loading…</span></div>;
+  if (state === "login")   return <Login onSuccess={() => setState("app")} />;
+
+  const svcId = page.startsWith("svc:") ? page.slice(4) : null;
 
   return (
-    <div style={S.layout}>
-      <style>{`@keyframes fadein { from { opacity:0; transform:translateY(8px) } to { opacity:1; transform:none } }`}</style>
+    <div style={T.layout}>
+      <style>{`* { box-sizing: border-box; margin: 0; padding: 0; } body { background: ${C.bg}; } input:focus { border-color: ${C.accent} !important; } select:focus { outline: none; border-color: ${C.accent} !important; }`}</style>
 
-      {/* Sidebar */}
-      <nav style={S.sidebar}>
-        <div style={S.logo}>
-          <div style={S.logoText}>GoBoiler</div>
-          <div style={S.logoBadge}>Admin</div>
+      <nav style={T.sidebar}>
+        <div style={T.logoWrap}>
+          <div style={T.logoText}>GoBoiler</div>
+          <div style={T.logoBadge}>Admin Panel</div>
         </div>
-        {PAGES.map(p => (
-          <div
-            key={p.id}
-            style={S.navItem(page === p.id)}
-            onClick={() => setPage(p.id)}
-          >
-            <span style={{ fontSize: 15 }}>{p.icon}</span>
-            {p.label}
-          </div>
-        ))}
-        <div style={{ marginTop: "auto", padding: "0 20px" }}>
-          <a
-            href="/auth/sign-out"
-            style={{ color: "#475569", fontSize: 13, textDecoration: "none" }}
-          >
-            ← Sign out
-          </a>
+
+        <div style={{ flex: 1, paddingTop: 8 }}>
+          {NAV.map(group => (
+            <div key={group.section}>
+              <div style={T.navSection}>{group.section}</div>
+              {group.items.map(item => (
+                <NavItem key={item.id} id={item.id} label={item.label} active={page === item.id} onClick={() => setPage(item.id as Page)} />
+              ))}
+            </div>
+          ))}
+        </div>
+
+        <div style={{ padding: "16px 16px", borderTop: `1px solid ${C.border}` }}>
+          <a href="/auth/sign-out" style={{ fontSize: 12, color: C.muted, textDecoration: "none" }}>← Sign out</a>
         </div>
       </nav>
 
-      {/* Main */}
-      <main style={S.main}>
+      <main style={T.main}>
         {page === "dashboard" && <Dashboard />}
-        {page === "users"     && <Users toast={toast} />}
-        {page === "sessions"  && <Sessions toast={toast} />}
+        {page === "users"     && <Users toast={showToast} />}
+        {page === "sessions"  && <Sessions toast={showToast} />}
         {page === "wallets"   && <Wallets />}
-        {page === "services"  && <Services toast={toast} />}
+        {svcId && <ServicePage svcId={svcId} toast={showToast} />}
       </main>
 
-      {toastMsg && (
-        <Toast msg={toastMsg.msg} type={toastMsg.type} onDone={() => setToastMsg(null)} />
-      )}
+      {toast && <Toast msg={toast.msg} type={toast.type} onDone={() => setToast(null)} />}
     </div>
   );
 }
