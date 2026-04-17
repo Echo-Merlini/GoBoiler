@@ -20,13 +20,19 @@ Production-ready TypeScript backend boilerplate for SaaS and Web3 apps. Ships wi
 | **Storage** | S3-compatible (AWS, R2, MinIO) — multipart upload + presigned URL |
 | **Crypto** | Multi-chain viem with RPC fallbacks, ERC20/721 token gating, ENS resolution |
 | **AI Agent** | Anthropic / OpenAI / Groq / Mistral keys managed via admin panel |
+| **AI Skills** | Configurable AI skill definitions (provider, model, system prompt, tools) with chat endpoint and per-session conversation history |
 | **MCP Servers** | Model Context Protocol server registry (SSE, HTTP, stdio) in DB |
+| **Outgoing Webhooks** | HMAC-SHA256-signed HTTP callbacks to external URLs; per-event filtering, retry via job queue |
+| **Feature Flags** | Boolean flags with plan-based and per-user-ID rules; 1-min in-memory cache; middleware helper |
+| **In-App Notifications** | Per-user notification inbox (DB-persisted) with live SSE delivery stream |
+| **Audit Log** | Fire-and-forget DB log of every admin action with before/after diffs |
+| **Job Queue** | In-process DB-backed queue with exponential backoff retry (no Redis required) |
 | **Cron Jobs** | node-cron scheduler, HTTP-triggered jobs, start/stop/run-now, persistent in DB |
-| **SSE** | Live log streaming to admin panel via Server-Sent Events |
+| **SSE** | Live log streaming + per-user notification stream via Server-Sent Events |
 | **Security** | Rate limiting per-route, CSP/HSTS/X-Frame security headers, scope middleware |
 | **Logging** | Structured logger → DB + SSE broadcast; log viewer with live filter |
-| **Admin Panel** | React SPA at `/admin` — users, sessions, wallets, services, AI, MCP, cron, push, logs, API keys, FAQ |
-| **Middleware** | `requireAuth`, `requireAdmin`, `requireWallet`, `requirePlan`, `requireScope`, `requireToken` |
+| **Admin Panel** | React SPA at `/admin` — collapsible sidebar: General, Services, AI, Security, System sections |
+| **Middleware** | `requireAuth`, `requireAdmin`, `requireWallet`, `requirePlan`, `requireScope`, `requireToken`, `requireFlag` |
 
 ---
 
@@ -51,6 +57,8 @@ graph TB
             BILL["/billing/*\nStripe"]
             PUSH["/push/*\nWeb Push"]
             UPLOAD["/upload/*\nS3 / R2"]
+            AGENT["/agent/*\nAI Skills"]
+            NOTIF["/notifications/*\nIn-App Notifications"]
             ADMIN["/admin/*\nAdmin API"]
         end
 
@@ -79,10 +87,12 @@ graph TB
 
     subgraph Scheduler["In-Process Scheduler"]
         CRON["node-cron\nHTTP-triggered jobs"]
+        QUEUE["Job Queue\n(5s polling, exponential backoff)"]
     end
 
-    subgraph Realtime["Realtime"]
-        SSE["SSE log stream\n/admin/api/logs/stream"]
+    subgraph Realtime["Realtime (SSE)"]
+        SSE["Log stream\n/admin/api/logs/stream"]
+        NSSE["Notification stream\n/notifications/stream"]
         LOGGER["Structured Logger\n(DB + SSE broadcast)"]
     end
 
@@ -100,10 +110,12 @@ graph TB
     Routes --> VAPID
     Routes --> RPC
     CRON -->|HTTP calls| Routes
+    QUEUE -->|workers| Routes
     LOGGER --> DB
     LOGGER --> SSE
     SSE -->|EventSource| Admin
-    AI -->|API calls| ADMIN
+    NSSE -->|EventSource| FE
+    AI -->|API calls| AGENT
     MCP -->|configured| ADMIN
 ```
 
@@ -361,6 +373,26 @@ GET /health  →  { status: "ok", ts: 1234567890 }
 | `PUT` | `/admin/api/mcp/servers` | Save MCP server list |
 | `GET` | `/admin/api/push/generate-vapid` | Generate VAPID key pair |
 | `GET` | `/admin/api/push/subscriptions` | List push subscriptions |
+| `GET` | `/admin/api/skills` | List AI skills |
+| `POST` | `/admin/api/skills` | Create skill `{ name, systemPrompt, provider, model, ... }` |
+| `PATCH` | `/admin/api/skills/:id` | Update skill |
+| `DELETE` | `/admin/api/skills/:id` | Delete skill |
+| `GET` | `/admin/api/webhooks` | List webhook endpoints |
+| `POST` | `/admin/api/webhooks` | Create endpoint `{ name, url, events, enabled }` → `{ secret }` shown once |
+| `PATCH` | `/admin/api/webhooks/:id` | Update endpoint |
+| `DELETE` | `/admin/api/webhooks/:id` | Delete endpoint |
+| `GET` | `/admin/api/webhooks/:id/deliveries` | Delivery log for an endpoint |
+| `GET` | `/admin/api/flags` | List feature flags |
+| `POST` | `/admin/api/flags` | Create flag `{ key, description, enabled, planRules?, userIds? }` |
+| `PATCH` | `/admin/api/flags/:id` | Update flag (invalidates cache) |
+| `DELETE` | `/admin/api/flags/:id` | Delete flag |
+| `GET` | `/admin/api/notifications` | List all notifications (admin view) |
+| `POST` | `/admin/api/notifications/send` | Send notification to a user or broadcast |
+| `DELETE` | `/admin/api/notifications/:id` | Delete a notification |
+| `GET` | `/admin/api/audit` | Query audit log `?action=&resource=&limit=` |
+| `GET` | `/admin/api/jobs` | List jobs `?status=&type=&limit=` |
+| `POST` | `/admin/api/jobs/:id/retry` | Re-enqueue a failed job |
+| `DELETE` | `/admin/api/jobs/:id` | Delete job record |
 
 ---
 
@@ -377,6 +409,7 @@ import {
   requireScope,
   requireToken,
 } from "@/auth/middleware";
+import { requireFlag } from "@/lib/flags";
 
 // Any authenticated user (cookie session · Bearer session · gbk_ API key · wallet JWT)
 app.get("/protected", requireAuth, handler);
@@ -395,6 +428,9 @@ app.get("/reports", requireAuth, requireScope("reports"), handler);
 
 // Must hold required ERC20/721 token (set upstream by token-gate middleware)
 app.get("/token-gated", requireAuth, requireToken, handler);
+
+// Feature flag must be enabled for this user (plan-based or per-user-ID rules)
+app.get("/beta-feature", requireAuth, requireFlag("beta_feature"), handler);
 ```
 
 ### Context values available after `requireAuth`
@@ -471,6 +507,126 @@ const apiKey = process.env.ANTHROPIC_API_KEY ?? row?.value;
 
 Register Model Context Protocol servers under **AI → MCP Servers**. Supported transports: SSE, HTTP (Streamable HTTP), stdio. Configs stored in the `mcp_server` DB table — any AI agent can read the registry via `GET /admin/api/mcp/servers`.
 
+### AI Skills
+
+Skills are reusable AI personas defined in the DB (provider, model, system prompt, temperature, max tokens). Use the skill chat endpoint from your frontend:
+
+```typescript
+// List enabled skills
+GET /agent/skills
+
+// Chat with a skill (persists conversation history per sessionId)
+POST /agent/chat  { skillId, message, sessionId }
+→ { reply, sessionId }
+
+// Fetch conversation history
+GET /agent/history/:sessionId
+```
+
+Providers: `anthropic` (native API), `openai` / `groq` (OpenAI-compatible), `mistral`. Keys are read from the `service_config` DB table or env vars.
+
+---
+
+## Outgoing Webhooks
+
+Dispatch signed HTTP callbacks to external URLs whenever events occur in your app:
+
+```typescript
+import { dispatch } from "@/lib/webhooks";
+
+// Fire-and-forget — enqueues a delivery job, retried automatically on failure
+await dispatch("user.created", { id: user.id, email: user.email });
+```
+
+Payloads are HMAC-SHA256 signed. Verify on the receiver:
+
+```typescript
+const sig  = request.headers["x-goboiler-signature"]; // "sha256=<hex>"
+const body = await request.text();
+const expected = "sha256=" + createHmac("sha256", secret).update(body).digest("hex");
+if (!timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) throw new Error("Bad signature");
+```
+
+Endpoints and delivery logs are managed at **Admin → Security → Webhooks**.
+
+---
+
+## Feature Flags
+
+Boolean flags with optional plan or per-user-ID targeting, cached in-memory for 1 minute:
+
+```typescript
+import { isEnabled } from "@/lib/flags";
+
+// In a handler — pass the user for per-user/plan evaluation
+const enabled = await isEnabled("new_dashboard", user);
+if (!enabled) return c.json({ error: "Not available" }, 403);
+```
+
+Flags are created and toggled at **Admin → Security → Feature Flags**. Rules:
+- **`planRules`** — comma-separated plan names (`free,pro`) that see the flag as enabled
+- **`userIds`** — comma-separated user IDs for targeted rollout
+
+---
+
+## In-App Notifications
+
+Send notifications to individual users or broadcast to all. Each notification is persisted in the DB and delivered live via SSE:
+
+```typescript
+import { sendNotification, broadcastNotification } from "@/lib/notify";
+
+// Send to one user
+await sendNotification({ userId, title: "Your export is ready", body: "Download it here", url: "/exports" });
+
+// Broadcast to all connected users
+await broadcastNotification({ title: "Maintenance in 5 min", body: "Save your work" });
+```
+
+Frontend subscribes to `GET /notifications/stream` (EventSource). REST endpoints:
+
+```
+GET  /notifications            → paginated list (most recent 50)
+GET  /notifications/unread-count → { count }
+POST /notifications/:id/read   → mark one read
+POST /notifications/read-all   → mark all read
+```
+
+---
+
+## Audit Log
+
+Every significant admin action is recorded automatically (fire-and-forget — never blocks the request path):
+
+```typescript
+import { audit } from "@/lib/audit";
+
+// Inside a route handler:
+await audit(c, "user.updated", "user", user.id, before, after);
+```
+
+Fields stored: `action`, `resource`, `resourceId`, `before` (JSON), `after` (JSON), `ip`, `userEmail`, `createdAt`. Query at **Admin → System → Audit Log** or via `GET /admin/api/audit`.
+
+---
+
+## Job Queue
+
+In-process DB-backed queue — no Redis or external broker required:
+
+```typescript
+import { enqueue, registerWorker } from "@/lib/queue";
+
+// Enqueue a job (runs at next tick, or after runAt delay)
+await enqueue("report.generate", { userId, reportId }, { maxAttempts: 5 });
+
+// Register a worker for a job type
+registerWorker("report.generate", async (job) => {
+  await generateReport(job.payload.reportId);
+});
+```
+
+Failed jobs are retried with exponential backoff: `5^attempt × 60 s`. The queue polls every 5 seconds. Manage jobs at **Admin → System → Job Queue** (retry / delete individual records).
+
 ---
 
 ## Push Notifications & PWA
@@ -543,6 +699,14 @@ Works with AWS S3, Cloudflare R2, MinIO, Backblaze B2 — configure `S3_ENDPOINT
 | `push_subscription` | Web Push subscription objects per user |
 | `cron_job` | Scheduled job definitions |
 | `mcp_server` | MCP server registry |
+| `skill` | AI skill definitions (provider, model, system prompt, tools, enabled) |
+| `conversation` | Per-session AI chat history (role, content, skillId, sessionId, userId) |
+| `webhook_endpoint` | Outgoing webhook registrations (url, secret hash, events filter, enabled) |
+| `webhook_delivery` | Delivery attempts with status, response, attempts count |
+| `feature_flag` | Feature flag definitions with plan rules and per-user-ID targeting |
+| `notification` | Per-user in-app notifications (title, body, url, read, createdAt) |
+| `audit_log` | Admin action log (action, resource, before/after JSON, ip, userEmail) |
+| `job_queue` | Background job records (type, payload, status, attempts, runAt, error) |
 
 ```bash
 bun run db:generate   # regenerate SQL from schema changes
@@ -582,18 +746,26 @@ GoBoiler/
 │   │   └── schema.ts        # All table definitions
 │   ├── lib/
 │   │   ├── apikeys.ts       # generateKey / createApiKey / verifyApiKey / revokeApiKey
+│   │   ├── audit.ts         # Fire-and-forget audit log helper
 │   │   ├── cron.ts          # node-cron job manager (register, start, stop, run-now)
+│   │   ├── flags.ts         # Feature flags with 1-min in-memory cache + requireFlag middleware
 │   │   ├── logger.ts        # Structured logger → DB + SSE broadcast
+│   │   ├── notify.ts        # In-app notification sender + per-user SSE client registry
 │   │   ├── push.ts          # VAPID Web Push + external service fallback
+│   │   ├── queue.ts         # In-process job queue (DB-backed, exponential backoff, no Redis)
+│   │   ├── skills.ts        # AI skill executor (multi-provider, conversation history)
 │   │   ├── storage.ts       # S3-compatible upload + presigned URL helpers
 │   │   ├── stripe.ts        # Stripe client + helpers
-│   │   └── utils.ts         # nanoid, shared utilities
+│   │   ├── utils.ts         # nanoid, shared utilities
+│   │   └── webhooks.ts      # Outgoing webhooks (HMAC-signed, queue-backed delivery)
 │   ├── routes/
 │   │   ├── index.ts         # Route registry (ordering: siwe before auth)
-│   │   ├── admin.ts         # Admin API (stats, users, sessions, wallets, services, keys, logs, cron, MCP, push, SSE)
+│   │   ├── admin.ts         # Admin API (stats, users, sessions, wallets, services, keys, logs, cron, MCP, push, skills, webhooks, flags, notifications, audit, jobs)
+│   │   ├── agent.ts         # /agent/* — skill list, chat, conversation history
 │   │   ├── auth.ts          # Better Auth handler mount
 │   │   ├── billing.ts       # Stripe checkout / portal / webhook
 │   │   ├── me.ts            # Profile routes
+│   │   ├── notifications.ts # /notifications/* — list, unread count, mark read, SSE stream
 │   │   ├── push.ts          # Push subscribe / send routes
 │   │   └── upload.ts        # Multipart + presigned upload routes
 │   └── index.ts             # Entry point — middleware stack, rate limits, seed admin, start server
@@ -623,13 +795,15 @@ GoBoiler/
 
 The admin panel is a self-contained React SPA served at `/admin`. It requires an active admin session (cookie-based). Build after any changes to `admin/app.tsx` with `bun run admin:build`.
 
+The sidebar groups pages into collapsible sections. Each section auto-expands when it contains the active page.
+
 | Section | Pages |
 |---|---|
 | General | Dashboard (stats), Users, Sessions, Wallets |
 | Services | Auth (Google OAuth), Email (Resend), Stripe, Crypto (RPC + SIWE), Database, Storage (S3) |
-| AI | Agent Keys (Anthropic / OpenAI / Groq / Mistral), MCP Servers |
-| Security | API Keys (create, list, revoke) |
-| System | Cron Jobs, Push / PWA (VAPID + subscriptions), Logs (live SSE stream) |
+| AI | Agent Keys (Anthropic / OpenAI / Groq / Mistral), MCP Servers, Skills (create + test chat) |
+| Security | API Keys (create, list, revoke), Webhooks (endpoints + delivery log), Feature Flags |
+| System | Cron Jobs, Job Queue (retry / delete), Push / PWA (VAPID + subscriptions), Logs (live SSE), Notifications (send + history), Audit Log |
 | — | FAQ & Setup Guide (all services + flows documented inline) |
 
 Service credentials can be set from the panel (written to `service_config` in DB) or via environment variables. Environment variables take precedence; the source badge shows `env`, `db`, or `unset` for each field.
@@ -652,6 +826,9 @@ Service credentials can be set from the panel (written to `service_config` in DB
 □ Reverse proxy — x-forwarded-for header forwarded correctly for rate limiting to work
 □ Startup logs — no ⚠ warnings (means chains using public RPC fallback instead of dedicated keys)
 □ Admin panel — all service tabs show no "unset" badges for required fields
+□ AI Skills — at least one provider key set (Anthropic / OpenAI / Groq / Mistral) if Skills are enabled
+□ Webhooks — endpoint URLs are production URLs; secrets noted before leaving creation screen (shown once)
+□ Feature flags — review flag states before go-live; default is disabled
 ```
 
 ---

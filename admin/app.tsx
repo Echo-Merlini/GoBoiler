@@ -1963,6 +1963,149 @@ Security Headers (auto-applied):
   Referrer-Policy: strict-origin-when-cross-origin, HSTS: 2 years.`,
   },
   {
+    title: "AI Skills — setup & usage",
+    body: `Skills are reusable AI personas stored in the DB.
+
+Create a skill (Admin → AI → Skills):
+  • Name + description
+  • Provider: anthropic | openai | groq | mistral
+  • Model: e.g. claude-opus-4-7, gpt-4o, llama3-70b-8192
+  • System prompt: defines the skill's behaviour
+  • Temperature (0–2) + max tokens
+  • Tools: optional JSON array of tool definitions
+  • Enabled toggle
+
+Provider keys are read from Admin → Services → AI (or env vars):
+  ANTHROPIC_API_KEY, OPENAI_API_KEY, GROQ_API_KEY, MISTRAL_API_KEY
+
+Frontend usage (requireAuth):
+  GET  /agent/skills                  → list of enabled skills
+  POST /agent/chat  { skillId, message, sessionId }
+       → { reply, sessionId }         (sessionId auto-generated if omitted)
+  GET  /agent/history/:sessionId      → conversation history
+
+Conversation history is persisted per sessionId in the DB — resumable across page reloads.
+Test the skill inline from the Admin panel using the built-in chat drawer.`,
+  },
+  {
+    title: "Outgoing Webhooks — setup & HMAC verification",
+    body: `Webhooks deliver signed HTTP POST callbacks to external URLs on app events.
+
+1. Admin → Security → Webhooks → Add endpoint
+   • URL: your receiver endpoint
+   • Events: comma-separated event names (e.g. user.created,user.deleted) or * for all
+   • The raw secret is shown ONCE on creation — save it immediately
+
+2. Dispatch an event from your backend:
+   import { dispatch } from "@/lib/webhooks";
+   await dispatch("user.created", { id, email });
+   // Enqueues a delivery job — retried automatically on failure
+
+3. Verify the signature on your receiver:
+   const sig = req.headers["x-goboiler-signature"]; // "sha256=<hex>"
+   const expected = "sha256=" + createHmac("sha256", secret).update(rawBody).digest("hex");
+   if (!timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) throw new Error("Bad sig");
+
+Delivery history (status, response body, attempts) is visible in Admin → Security → Webhooks → Deliveries.
+Failed deliveries are retried via the job queue with exponential backoff (up to 5 attempts).`,
+  },
+  {
+    title: "Feature Flags — setup & usage",
+    body: `Feature flags are boolean switches with optional plan or per-user targeting.
+
+Create a flag (Admin → Security → Feature Flags):
+  • Key: snake_case identifier (e.g. new_dashboard)
+  • Description: human-readable note
+  • Enabled: global on/off
+  • Plan rules: comma-separated plans (free,pro,enterprise) that see it as enabled
+  • User IDs: comma-separated user IDs for targeted rollout
+
+Usage in your route handlers:
+  import { isEnabled } from "@/lib/flags";
+  const enabled = await isEnabled("new_dashboard", user);
+  if (!enabled) return c.json({ error: "Not enabled" }, 403);
+
+As middleware (auto-401 if flag is off for the user):
+  import { requireFlag } from "@/lib/flags";
+  app.get("/new-feature", requireAuth, requireFlag("new_dashboard"), handler);
+
+Evaluation order: disabled globally → off; planRules match → on; userIds match → on; else → off.
+Flags are cached in-memory for 1 minute. Cache is invalidated automatically on any flag write.`,
+  },
+  {
+    title: "In-App Notifications — send & receive",
+    body: `Notifications are persisted in the DB and delivered live to connected clients via SSE.
+
+Send from your backend:
+  import { sendNotification, broadcastNotification } from "@/lib/notify";
+
+  // One user
+  await sendNotification({ userId, title: "Export ready", body: "Click to download", url: "/exports" });
+
+  // All connected users
+  await broadcastNotification({ title: "Maintenance in 5 min", body: "Save your work" });
+
+Frontend — subscribe to the SSE stream:
+  const es = new EventSource("/notifications/stream", { withCredentials: true });
+  es.onmessage = (e) => {
+    const notif = JSON.parse(e.data);
+    // { id, title, body, url, read, createdAt }
+  };
+
+REST endpoints (all require auth):
+  GET  /notifications              → last 50 notifications
+  GET  /notifications/unread-count → { count }
+  POST /notifications/:id/read     → mark one read
+  POST /notifications/read-all     → mark all read
+
+Admin panel (Admin → System → Notifications): send to a specific user or broadcast, view all history.`,
+  },
+  {
+    title: "Audit Log — what's tracked",
+    body: `The audit log records admin actions automatically — it never blocks the request path.
+
+What's logged by default:
+  • user.updated   — any PATCH to a user (plan, isAdmin)
+  • user.deleted   — DELETE user
+  • apikey.revoked — DELETE api key
+
+Add audit calls to your own routes:
+  import { audit } from "@/lib/audit";
+  // Inside handler, after mutation:
+  await audit(c, "invoice.sent", "invoice", invoice.id, null, { email, amount });
+  // Params: (ctx, action, resource, resourceId?, before?, after?)
+
+Fields stored: action, resource, resourceId, before (JSON), after (JSON), ip, userEmail, createdAt.
+
+Query at Admin → System → Audit Log — expand rows to see before/after diffs.
+API: GET /admin/api/audit?action=user.updated&resource=user&limit=50`,
+  },
+  {
+    title: "Job Queue — workers & retry",
+    body: `In-process DB-backed queue — no Redis or external broker needed.
+
+Enqueue a job from anywhere:
+  import { enqueue } from "@/lib/queue";
+  await enqueue("report.generate", { userId, reportId }, {
+    maxAttempts: 5,            // default 3
+    runAt: new Date(Date.now() + 60_000),  // optional delay
+  });
+
+Register a worker (call once at startup in src/index.ts or a lib file):
+  import { registerWorker } from "@/lib/queue";
+  registerWorker("report.generate", async (job) => {
+    await generateReport(job.payload.reportId);
+    // Throw to trigger retry
+  });
+
+Retry schedule (exponential backoff): 5^attempt × 60 s
+  attempt 1 → 5 min, attempt 2 → 25 min, attempt 3 → 125 min (≈ 2h)
+
+The queue polls the DB every 5 seconds.
+Webhooks are delivered through the job queue automatically (type: "webhook.deliver").
+Manage jobs at Admin → System → Job Queue — retry or delete individual records.`,
+  },
+  {
     title: "Deployment checklist",
     body: `Before going live:
 □ Services tabs show no "unset" badges for required fields
@@ -1974,6 +2117,9 @@ Security Headers (auto-applied):
 □ ADMIN_EMAIL + ADMIN_PASSWORD set before first boot
 □ Push: VAPID keys generated and saved (System → Push / PWA)
 □ PWA: icons added to public/icons/ and manifest.json updated
+□ AI Skills: at least one provider key set if skills are enabled
+□ Webhooks: endpoint URLs are production URLs; secrets saved (shown once)
+□ Feature flags: review flag states — all default to disabled
 □ Check server logs on startup — ⚠ warnings mean chains still on public RPC fallback`,
   },
 ];
