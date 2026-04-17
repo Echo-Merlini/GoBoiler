@@ -197,3 +197,107 @@ export const twoFactor = pgTable("two_factor", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
+
+// ─── AI Skills ───────────────────────────────────────────
+export const skill = pgTable("skill", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description"),
+  systemPrompt: text("system_prompt").notNull().default("You are a helpful assistant."),
+  provider: text("provider").notNull().default("anthropic"), // anthropic | openai | groq | mistral
+  model: text("model").notNull().default("claude-sonnet-4-6"),
+  temperature: text("temperature").notNull().default("0.7"),
+  maxTokens: integer("max_tokens").notNull().default(2048),
+  tools: text("tools"),         // JSON array of tool definitions (OpenAI format)
+  enabled: boolean("enabled").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const conversation = pgTable("conversation", {
+  id: text("id").primaryKey(),
+  skillId: text("skill_id").references(() => skill.id, { onDelete: "set null" }),
+  userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
+  sessionId: text("session_id").notNull().unique(),
+  messages: text("messages").notNull().default("[]"), // JSON: [{role,content}]
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// ─── Outgoing Webhooks ───────────────────────────────────
+export const webhookEndpoint = pgTable("webhook_endpoint", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  url: text("url").notNull(),
+  secret: text("secret").notNull(),              // HMAC signing key (stored plaintext — admin-only)
+  events: text("events").notNull().default("*"), // comma-separated event names or "*"
+  enabled: boolean("enabled").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const webhookDelivery = pgTable("webhook_delivery", {
+  id: text("id").primaryKey(),
+  endpointId: text("endpoint_id")
+    .notNull()
+    .references(() => webhookEndpoint.id, { onDelete: "cascade" }),
+  event: text("event").notNull(),
+  payload: text("payload").notNull(),            // JSON sent to endpoint
+  status: text("status").notNull().default("pending"), // pending | success | failed
+  attempts: integer("attempts").notNull().default(0),
+  responseStatus: integer("response_status"),
+  responseBody: text("response_body"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// ─── Feature Flags ───────────────────────────────────────
+export const featureFlag = pgTable("feature_flag", {
+  id: text("id").primaryKey(),
+  key: text("key").notNull().unique(),
+  name: text("name").notNull(),
+  description: text("description"),
+  enabled: boolean("enabled").notNull().default(false),
+  rules: text("rules"),   // JSON: { plans?: string[], userIds?: string[] } — null = all users
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// ─── In-App Notifications ────────────────────────────────
+export const notification = pgTable("notification", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  body: text("body"),
+  url: text("url"),
+  read: boolean("read").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// ─── Audit Log ───────────────────────────────────────────
+export const auditLog = pgTable("audit_log", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").references(() => user.id, { onDelete: "set null" }),
+  action: text("action").notNull(),      // e.g. "user.deleted", "plan.changed", "key.revoked"
+  resource: text("resource").notNull(),  // e.g. "user", "session", "api_key"
+  resourceId: text("resource_id"),
+  before: text("before"),               // JSON snapshot before change
+  after: text("after"),                 // JSON snapshot after change
+  ip: text("ip"),
+  userAgent: text("user_agent"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// ─── Background Job Queue ────────────────────────────────
+export const jobQueue = pgTable("job_queue", {
+  id: text("id").primaryKey(),
+  type: text("type").notNull(),                          // worker key, e.g. "webhook.deliver"
+  payload: text("payload").notNull().default("{}"),      // JSON
+  status: text("status").notNull().default("pending"),   // pending | processing | done | failed
+  attempts: integer("attempts").notNull().default(0),
+  maxAttempts: integer("max_attempts").notNull().default(3),
+  runAt: timestamp("run_at").notNull().defaultNow(),     // earliest time to process
+  processedAt: timestamp("processed_at"),
+  error: text("error"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});

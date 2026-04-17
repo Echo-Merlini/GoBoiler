@@ -1090,6 +1090,624 @@ function LogViewer({ toast }: { toast: (m: string, t?: "ok" | "err") => void }) 
   );
 }
 
+// ─── Skills ──────────────────────────────────────────────
+const PROVIDERS = [
+  { value: "anthropic", label: "Anthropic", models: ["claude-sonnet-4-6", "claude-opus-4-7", "claude-haiku-4-5-20251001"] },
+  { value: "openai",    label: "OpenAI",    models: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"] },
+  { value: "groq",      label: "Groq",      models: ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768"] },
+  { value: "mistral",   label: "Mistral",   models: ["mistral-large-latest", "mistral-small-latest", "open-mixtral-8x7b"] },
+];
+
+function SkillsPage({ toast }: { toast: (m: string, t?: "ok" | "err") => void }) {
+  const [skills, setSkills] = useState<Skill[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState<Skill | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [testSkill, setTestSkill] = useState<Skill | null>(null);
+  const [testMsg, setTestMsg] = useState("");
+  const [testSessionId, setTestSessionId] = useState("");
+  const [chatLog, setChatLog] = useState<{ role: string; content: string }[]>([]);
+  const [testing, setTesting] = useState(false);
+  const blank = { name: "", description: "", systemPrompt: "You are a helpful assistant.", provider: "anthropic", model: "claude-sonnet-4-6", temperature: "0.7", maxTokens: 2048, tools: "", enabled: true };
+  const [form, setForm] = useState(blank);
+
+  const load = () => api<Skill[]>("/skills").then(s => { setSkills(s); setLoading(false); }).catch(() => setLoading(false));
+  useEffect(() => { load(); }, []);
+
+  const save = async () => {
+    const payload = { ...form, maxTokens: Number(form.maxTokens), tools: form.tools || undefined };
+    try {
+      if (editing) {
+        const updated = await api<Skill>(`/skills/${editing.id}`, { method: "PATCH", body: JSON.stringify(payload) });
+        setSkills(p => p.map(s => s.id === updated.id ? updated : s));
+      } else {
+        const created = await api<Skill>("/skills", { method: "POST", body: JSON.stringify(payload) });
+        setSkills(p => [created, ...p]);
+      }
+      setAdding(false); setEditing(null); setForm(blank); toast("Saved");
+    } catch (e: any) { toast(e.message, "err"); }
+  };
+
+  const toggle = async (sk: Skill) => {
+    const updated = await api<Skill>(`/skills/${sk.id}`, { method: "PATCH", body: JSON.stringify({ enabled: !sk.enabled }) }).catch(() => null);
+    if (updated) setSkills(p => p.map(s => s.id === sk.id ? updated : s));
+  };
+
+  const del = async (sk: Skill) => {
+    if (!confirm(`Delete skill "${sk.name}"?`)) return;
+    try { await api(`/skills/${sk.id}`, { method: "DELETE" }); setSkills(p => p.filter(s => s.id !== sk.id)); toast("Deleted"); }
+    catch (e: any) { toast(e.message, "err"); }
+  };
+
+  const openTest = (sk: Skill) => { setTestSkill(sk); setChatLog([]); setTestSessionId(""); setTestMsg(""); };
+
+  const sendTestMsg = async () => {
+    if (!testMsg.trim() || !testSkill) return;
+    const msg = testMsg.trim();
+    setTestMsg(""); setTesting(true);
+    setChatLog(p => [...p, { role: "user", content: msg }]);
+    try {
+      const r = await api<{ reply: string; sessionId: string }>(`/skills/${testSkill.id}/test`, { method: "POST", body: JSON.stringify({ message: msg, sessionId: testSessionId || undefined }) });
+      setTestSessionId(r.sessionId);
+      setChatLog(p => [...p, { role: "assistant", content: r.reply }]);
+    } catch (e: any) { setChatLog(p => [...p, { role: "assistant", content: `✗ ${e.message}` }]); }
+    setTesting(false);
+  };
+
+  const provMeta = (provider: string) => PROVIDERS.find(p => p.value === provider);
+  const isForm = adding || !!editing;
+
+  return (
+    <>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 28 }}>
+        <div style={T.title as React.CSSProperties}>AI Skills</div>
+        <Btn label="+ New skill" onClick={() => { setAdding(true); setEditing(null); setForm(blank); }} />
+      </div>
+      <div style={{ fontSize: 13, color: C.faint, marginBottom: 24, lineHeight: 1.6 }}>
+        Skills are named agent configurations: a personality (system prompt), AI provider + model, tool definitions, and on/off toggle. Use <code style={{ color: C.accent }}>POST /agent/chat</code> with a <code style={{ color: C.accent }}>skillId</code> to invoke them.
+      </div>
+
+      {isForm && (
+        <div style={{ ...T.card, border: `1px solid ${C.accent}`, marginBottom: 20 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: C.text, marginBottom: 16 }}>{editing ? `Edit: ${editing.name}` : "New Skill"}</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+            <div><label style={T.label}>Name</label><input style={T.input} value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} placeholder="e.g. Support Agent" /></div>
+            <div><label style={T.label}>Description</label><input style={T.input} value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} placeholder="What this skill does" /></div>
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <label style={T.label}>System Prompt (personality / instructions)</label>
+            <textarea style={{ ...T.input, height: 100, resize: "vertical" as const }} value={form.systemPrompt} onChange={e => setForm(p => ({ ...p, systemPrompt: e.target.value }))} />
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12, marginBottom: 12 }}>
+            <div>
+              <label style={T.label}>Provider</label>
+              <select style={{ ...T.input, cursor: "pointer" }} value={form.provider} onChange={e => { const m = provMeta(e.target.value); setForm(p => ({ ...p, provider: e.target.value, model: m?.models[0] ?? "" })); }}>
+                {PROVIDERS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={T.label}>Model</label>
+              <select style={{ ...T.input, cursor: "pointer" }} value={form.model} onChange={e => setForm(p => ({ ...p, model: e.target.value }))}>
+                {(provMeta(form.provider)?.models ?? []).map(m => <option key={m}>{m}</option>)}
+              </select>
+            </div>
+            <div><label style={T.label}>Temperature</label><input style={T.input} type="number" step="0.1" min="0" max="2" value={form.temperature} onChange={e => setForm(p => ({ ...p, temperature: e.target.value }))} /></div>
+            <div><label style={T.label}>Max Tokens</label><input style={T.input} type="number" value={form.maxTokens} onChange={e => setForm(p => ({ ...p, maxTokens: Number(e.target.value) }))} /></div>
+          </div>
+          <div style={{ marginBottom: 16 }}>
+            <label style={T.label}>Tools <span style={{ color: C.muted }}>(JSON array, OpenAI function-calling format — optional)</span></label>
+            <textarea style={{ ...T.input, height: 80, fontFamily: "monospace", fontSize: 12, resize: "vertical" as const }} value={form.tools} onChange={e => setForm(p => ({ ...p, tools: e.target.value }))} placeholder='[{"type":"function","function":{"name":"get_weather","description":"...","parameters":{}}}]' />
+          </div>
+          <div style={{ display: "flex", gap: 10 }}>
+            <Btn label="Save" onClick={save} />
+            <Btn label="Cancel" variant="ghost" onClick={() => { setAdding(false); setEditing(null); }} />
+          </div>
+        </div>
+      )}
+
+      {testSkill && (
+        <div style={{ ...T.card, border: `1px solid ${C.accent}`, marginBottom: 20 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Test: {testSkill.name}</div>
+            <Btn label="Close" variant="ghost" onClick={() => { setTestSkill(null); setChatLog([]); }} />
+          </div>
+          <div style={{ background: C.bg, borderRadius: 7, border: `1px solid ${C.border}`, padding: 14, minHeight: 120, maxHeight: 300, overflowY: "auto" as const, marginBottom: 10 }}>
+            {chatLog.length === 0 && <div style={{ color: C.muted, fontSize: 12 }}>Send a message to test this skill…</div>}
+            {chatLog.map((m, i) => (
+              <div key={i} style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: m.role === "user" ? C.accent : C.success, marginBottom: 3, textTransform: "uppercase" as const, letterSpacing: 0.5 }}>{m.role}</div>
+                <div style={{ fontSize: 13, color: C.text, lineHeight: 1.6, whiteSpace: "pre-wrap" as const }}>{m.content}</div>
+              </div>
+            ))}
+            {testing && <div style={{ color: C.muted, fontSize: 12 }}>Thinking…</div>}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input style={{ ...T.input, flex: 1 }} placeholder="Type a message…" value={testMsg} onChange={e => setTestMsg(e.target.value)} onKeyDown={e => e.key === "Enter" && !e.shiftKey && sendTestMsg()} />
+            <Btn label="Send" onClick={sendTestMsg} disabled={testing} />
+          </div>
+        </div>
+      )}
+
+      <div style={T.card}>
+        {loading ? <div style={T.empty}>Loading…</div> : !skills.length ? <div style={T.empty}>No skills yet</div> : (
+          <table style={T.table}>
+            <thead><tr>{["Name","Provider","Model","Enabled",""].map(h => <th key={h} style={T.th}>{h}</th>)}</tr></thead>
+            <tbody>
+              {skills.map(sk => (
+                <tr key={sk.id}>
+                  <td style={T.td}>
+                    <div style={{ fontWeight: 600 }}>{sk.name}</div>
+                    {sk.description && <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>{sk.description}</div>}
+                  </td>
+                  <td style={T.td}><span style={T.chip}>{sk.provider}</span></td>
+                  <td style={{ ...T.td, fontFamily: "monospace", fontSize: 11, color: C.faint }}>{sk.model}</td>
+                  <td style={T.td}><input type="checkbox" checked={sk.enabled} onChange={() => toggle(sk)} style={{ cursor: "pointer", accentColor: C.accent }} /></td>
+                  <td style={T.td}>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <Btn label="Test" variant="ghost" onClick={() => openTest(sk)} />
+                      <Btn label="Edit" variant="ghost" onClick={() => { setEditing(sk); setAdding(false); setForm({ name: sk.name, description: sk.description ?? "", systemPrompt: sk.systemPrompt, provider: sk.provider, model: sk.model, temperature: sk.temperature, maxTokens: sk.maxTokens, tools: sk.tools ?? "", enabled: sk.enabled }); }} />
+                      <Btn label="Delete" variant="danger" onClick={() => del(sk)} />
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </>
+  );
+}
+
+// ─── Webhooks ─────────────────────────────────────────────
+const WEBHOOK_EVENTS = ["*", "user.created", "user.updated", "user.deleted", "plan.changed", "session.revoked", "payment.succeeded", "payment.failed"];
+
+function WebhooksPage({ toast }: { toast: (m: string, t?: "ok" | "err") => void }) {
+  const [endpoints, setEndpoints] = useState<WebhookEndpoint[]>([]);
+  const [deliveries, setDeliveries] = useState<WebhookDelivery[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [adding, setAdding] = useState(false);
+  const [selected, setSelected] = useState<string | null>(null);
+  const blank = { name: "", url: "", events: "*" };
+  const [form, setForm] = useState(blank);
+
+  const load = async () => {
+    const [eps, dels] = await Promise.all([
+      api<WebhookEndpoint[]>("/webhooks"),
+      api<WebhookDelivery[]>("/webhooks/deliveries?limit=50"),
+    ]);
+    setEndpoints(eps); setDeliveries(dels); setLoading(false);
+  };
+  useEffect(() => { load(); }, []);
+
+  const create = async () => {
+    if (!form.name || !form.url) return;
+    try {
+      const ep = await api<WebhookEndpoint>("/webhooks", { method: "POST", body: JSON.stringify(form) });
+      setEndpoints(p => [ep, ...p]); setAdding(false); setForm(blank); toast("Created");
+    } catch (e: any) { toast(e.message, "err"); }
+  };
+
+  const toggle = async (ep: WebhookEndpoint) => {
+    const updated = await api<WebhookEndpoint>(`/webhooks/${ep.id}`, { method: "PATCH", body: JSON.stringify({ enabled: !ep.enabled }) }).catch(() => null);
+    if (updated) setEndpoints(p => p.map(e => e.id === ep.id ? updated : e));
+  };
+
+  const del = async (ep: WebhookEndpoint) => {
+    if (!confirm(`Delete webhook "${ep.name}"?`)) return;
+    try { await api(`/webhooks/${ep.id}`, { method: "DELETE" }); setEndpoints(p => p.filter(e => e.id !== ep.id)); toast("Deleted"); }
+    catch (e: any) { toast(e.message, "err"); }
+  };
+
+  const filteredDeliveries = selected ? deliveries.filter(d => d.endpointId === selected) : deliveries;
+  const statusColor = (s: string) => s === "success" ? C.success : s === "failed" ? C.danger : C.warning;
+
+  return (
+    <>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 28 }}>
+        <div style={T.title as React.CSSProperties}>Outgoing Webhooks</div>
+        <Btn label="+ Add endpoint" onClick={() => setAdding(true)} />
+      </div>
+      <div style={{ fontSize: 13, color: C.faint, marginBottom: 24, lineHeight: 1.6 }}>
+        Notify external systems when events happen. Payloads are signed with <code style={{ color: C.accent }}>X-GoBoiler-Signature: sha256=…</code>. Use <code style={{ color: C.accent }}>dispatch(event, data)</code> from <code style={{ color: C.accent }}>@/lib/webhooks</code> in your route handlers.
+      </div>
+
+      {adding && (
+        <div style={{ ...T.card, border: `1px solid ${C.accent}`, marginBottom: 20 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: C.text, marginBottom: 16 }}>New Endpoint</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+            <div><label style={T.label}>Name</label><input style={T.input} placeholder="My Service" value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} /></div>
+            <div><label style={T.label}>URL</label><input style={T.input} placeholder="https://myapp.com/webhooks/goboiler" value={form.url} onChange={e => setForm(p => ({ ...p, url: e.target.value }))} /></div>
+          </div>
+          <div style={{ marginBottom: 16 }}>
+            <label style={T.label}>Events <span style={{ color: C.muted }}>(comma-separated or *)</span></label>
+            <div style={{ display: "flex", flexWrap: "wrap" as const, gap: 6, marginBottom: 8 }}>
+              {WEBHOOK_EVENTS.map(ev => (
+                <span key={ev} onClick={() => setForm(p => ({ ...p, events: ev === "*" ? "*" : p.events.split(",").map(e => e.trim()).includes(ev) ? p.events.split(",").filter(e => e.trim() !== ev).join(",") : [...p.events.split(",").filter(e => e.trim() && e.trim() !== "*"), ev].join(",") }))}
+                  style={{ ...T.chip, cursor: "pointer", background: form.events.includes(ev) ? C.accentDark : C.surface, color: form.events.includes(ev) ? "#fff" : C.faint, fontSize: 11 }}>
+                  {ev}
+                </span>
+              ))}
+            </div>
+            <input style={T.input} value={form.events} onChange={e => setForm(p => ({ ...p, events: e.target.value }))} placeholder="* or event1,event2" />
+          </div>
+          <div style={{ display: "flex", gap: 10 }}>
+            <Btn label="Create" onClick={create} />
+            <Btn label="Cancel" variant="ghost" onClick={() => setAdding(false)} />
+          </div>
+        </div>
+      )}
+
+      {loading ? <div style={T.empty}>Loading…</div> : (
+        <>
+          {endpoints.map(ep => (
+            <div key={ep.id} style={{ ...T.card, marginBottom: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                    <span style={{ fontSize: 14, fontWeight: 600, color: ep.enabled ? C.text : C.muted }}>{ep.name}</span>
+                    <span style={{ ...T.chip, fontSize: 10 }}>{ep.events}</span>
+                    {!ep.enabled && <span style={{ fontSize: 10, color: C.muted }}>disabled</span>}
+                  </div>
+                  <div style={{ fontSize: 12, color: C.faint, fontFamily: "monospace", marginBottom: 4 }}>{ep.url}</div>
+                  <div style={{ fontSize: 11, color: C.muted }}>
+                    Secret: <code style={{ color: C.faint, fontFamily: "monospace" }}>{ep.secret.slice(0, 8)}…</code>
+                    <span onClick={() => navigator.clipboard.writeText(ep.secret)} style={{ marginLeft: 6, color: C.accent, cursor: "pointer", fontSize: 10 }}>copy</span>
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <Btn label={selected === ep.id ? "Hide log" : "Show log"} variant="ghost" onClick={() => setSelected(selected === ep.id ? null : ep.id)} />
+                  <Btn label={ep.enabled ? "Disable" : "Enable"} variant="ghost" onClick={() => toggle(ep)} />
+                  <Btn label="Delete" variant="danger" onClick={() => del(ep)} />
+                </div>
+              </div>
+            </div>
+          ))}
+
+          {!endpoints.length && !adding && <div style={{ ...T.card, ...T.empty }}>No webhook endpoints configured</div>}
+
+          <div style={{ marginTop: 28 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: C.text, marginBottom: 14 }}>
+              Delivery Log {selected ? <span style={{ color: C.muted, fontWeight: 400 }}>— {endpoints.find(e => e.id === selected)?.name}</span> : ""}
+            </div>
+            {filteredDeliveries.length === 0 ? <div style={{ color: C.muted, fontSize: 13 }}>No deliveries yet</div> : (
+              <div style={{ ...T.card, padding: 0, overflow: "hidden" }}>
+                <table style={T.table}>
+                  <thead><tr>{["Event","Endpoint","Status","HTTP","Attempts","Time",""].map(h => <th key={h} style={T.th}>{h}</th>)}</tr></thead>
+                  <tbody>
+                    {filteredDeliveries.map(d => (
+                      <tr key={d.id}>
+                        <td style={T.td}><span style={T.chip}>{d.event}</span></td>
+                        <td style={{ ...T.td, fontSize: 11, color: C.faint, fontFamily: "monospace", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>{d.url}</td>
+                        <td style={T.td}><span style={{ color: statusColor(d.status), fontWeight: 600, fontSize: 11 }}>{d.status}</span></td>
+                        <td style={{ ...T.td, color: C.muted }}>{d.responseStatus ?? "—"}</td>
+                        <td style={{ ...T.td, color: C.muted }}>{d.attempts}</td>
+                        <td style={{ ...T.td, color: C.muted }}>{new Date(d.createdAt).toLocaleTimeString()}</td>
+                        <td style={T.td}>{d.responseBody && <span style={{ fontSize: 11, color: C.muted, fontFamily: "monospace" }}>{d.responseBody.slice(0, 40)}</span>}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+// ─── Feature Flags ────────────────────────────────────────
+function FlagsPage({ toast }: { toast: (m: string, t?: "ok" | "err") => void }) {
+  const [flags, setFlags] = useState<FeatureFlag[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [adding, setAdding] = useState(false);
+  const blank = { key: "", name: "", description: "", enabled: false, plans: [] as string[], userIds: "" };
+  const [form, setForm] = useState(blank);
+  const PLANS = ["free", "pro", "enterprise"];
+
+  const load = () => api<FeatureFlag[]>("/flags").then(f => { setFlags(f); setLoading(false); }).catch(() => setLoading(false));
+  useEffect(() => { load(); }, []);
+
+  const buildRules = () => {
+    const plans = form.plans.length ? form.plans : undefined;
+    const userIds = form.userIds ? form.userIds.split(",").map(s => s.trim()).filter(Boolean) : undefined;
+    if (!plans && !userIds) return undefined;
+    return JSON.stringify({ plans, userIds });
+  };
+
+  const create = async () => {
+    if (!form.key || !form.name) return;
+    try {
+      const flag = await api<FeatureFlag>("/flags", { method: "POST", body: JSON.stringify({ key: form.key, name: form.name, description: form.description || undefined, enabled: form.enabled, rules: buildRules() }) });
+      setFlags(p => [flag, ...p]); setAdding(false); setForm(blank); toast("Created");
+    } catch (e: any) { toast(e.message, "err"); }
+  };
+
+  const toggle = async (flag: FeatureFlag) => {
+    const updated = await api<FeatureFlag>(`/flags/${flag.id}`, { method: "PATCH", body: JSON.stringify({ enabled: !flag.enabled }) }).catch(() => null);
+    if (updated) setFlags(p => p.map(f => f.id === flag.id ? updated : f));
+  };
+
+  const del = async (flag: FeatureFlag) => {
+    if (!confirm(`Delete flag "${flag.key}"?`)) return;
+    try { await api(`/flags/${flag.id}`, { method: "DELETE" }); setFlags(p => p.filter(f => f.id !== flag.id)); toast("Deleted"); }
+    catch (e: any) { toast(e.message, "err"); }
+  };
+
+  const rulesLabel = (rules: string | null) => {
+    if (!rules) return "All users";
+    const r = JSON.parse(rules);
+    const parts: string[] = [];
+    if (r.plans?.length) parts.push(`Plans: ${r.plans.join(", ")}`);
+    if (r.userIds?.length) parts.push(`${r.userIds.length} user ID(s)`);
+    return parts.join(" + ") || "All users";
+  };
+
+  return (
+    <>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 28 }}>
+        <div style={T.title as React.CSSProperties}>Feature Flags</div>
+        <Btn label="+ New flag" onClick={() => setAdding(true)} />
+      </div>
+      <div style={{ fontSize: 13, color: C.faint, marginBottom: 24, lineHeight: 1.6 }}>
+        Toggle features per user/plan without deploying. Use <code style={{ color: C.accent }}>isEnabled("flag-key", user)</code> from <code style={{ color: C.accent }}>@/lib/flags</code> or the <code style={{ color: C.accent }}>requireFlag("key")</code> middleware. Cached for 60s in memory.
+      </div>
+
+      {adding && (
+        <div style={{ ...T.card, border: `1px solid ${C.accent}`, marginBottom: 20 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: C.text, marginBottom: 16 }}>New Feature Flag</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+            <div><label style={T.label}>Key <span style={{ color: C.muted }}>(slug, e.g. new-dashboard)</span></label><input style={T.input} value={form.key} onChange={e => setForm(p => ({ ...p, key: e.target.value }))} placeholder="my-feature" /></div>
+            <div><label style={T.label}>Name</label><input style={T.input} value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} placeholder="My Feature" /></div>
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <label style={T.label}>Description <span style={{ color: C.muted }}>(optional)</span></label>
+            <input style={T.input} value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} />
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <label style={T.label}>Allowed Plans <span style={{ color: C.muted }}>(empty = all plans)</span></label>
+            <div style={{ display: "flex", gap: 10 }}>
+              {PLANS.map(plan => (
+                <label key={plan} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: C.faint, cursor: "pointer" }}>
+                  <input type="checkbox" checked={form.plans.includes(plan)} onChange={e => setForm(p => ({ ...p, plans: e.target.checked ? [...p.plans, plan] : p.plans.filter(x => x !== plan) }))} style={{ accentColor: C.accent }} />
+                  {plan}
+                </label>
+              ))}
+            </div>
+          </div>
+          <div style={{ marginBottom: 16 }}>
+            <label style={T.label}>User IDs override <span style={{ color: C.muted }}>(comma-separated, always enabled for these users)</span></label>
+            <input style={T.input} value={form.userIds} onChange={e => setForm(p => ({ ...p, userIds: e.target.value }))} placeholder="user_abc123, user_def456" />
+          </div>
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <Btn label="Create" onClick={create} />
+            <Btn label="Cancel" variant="ghost" onClick={() => setAdding(false)} />
+            <label style={{ fontSize: 13, color: C.faint, marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
+              <input type="checkbox" checked={form.enabled} onChange={e => setForm(p => ({ ...p, enabled: e.target.checked }))} style={{ accentColor: C.accent }} /> Enabled on create
+            </label>
+          </div>
+        </div>
+      )}
+
+      <div style={T.card}>
+        {loading ? <div style={T.empty}>Loading…</div> : !flags.length ? <div style={T.empty}>No feature flags yet</div> : (
+          <table style={T.table}>
+            <thead><tr>{["Key","Name","Audience","Status",""].map(h => <th key={h} style={T.th}>{h}</th>)}</tr></thead>
+            <tbody>
+              {flags.map(f => (
+                <tr key={f.id}>
+                  <td style={T.td}><code style={{ fontSize: 12, fontFamily: "monospace", color: C.accent }}>{f.key}</code></td>
+                  <td style={T.td}>
+                    <div style={{ fontWeight: 600 }}>{f.name}</div>
+                    {f.description && <div style={{ fontSize: 11, color: C.muted }}>{f.description}</div>}
+                  </td>
+                  <td style={{ ...T.td, color: C.muted, fontSize: 12 }}>{rulesLabel(f.rules)}</td>
+                  <td style={T.td}>
+                    <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                      <input type="checkbox" checked={f.enabled} onChange={() => toggle(f)} style={{ accentColor: C.accent }} />
+                      <span style={{ fontSize: 12, color: f.enabled ? C.success : C.muted }}>{f.enabled ? "Enabled" : "Disabled"}</span>
+                    </label>
+                  </td>
+                  <td style={T.td}><Btn label="Delete" variant="danger" onClick={() => del(f)} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </>
+  );
+}
+
+// ─── Job Queue ────────────────────────────────────────────
+function JobQueuePage({ toast }: { toast: (m: string, t?: "ok" | "err") => void }) {
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [statusFilter, setStatusFilter] = useState("");
+
+  const load = () => {
+    const q = statusFilter ? `?status=${statusFilter}` : "?limit=100";
+    api<Job[]>(`/jobs${q}`).then(j => { setJobs(j); setLoading(false); }).catch(() => setLoading(false));
+  };
+  useEffect(() => { load(); }, [statusFilter]);
+
+  const retry = async (id: string) => {
+    try { await api(`/jobs/${id}/retry`, { method: "POST" }); load(); toast("Retrying"); }
+    catch (e: any) { toast(e.message, "err"); }
+  };
+
+  const clearDone = async () => {
+    if (!confirm("Clear all completed jobs?")) return;
+    try { await api("/jobs/done", { method: "DELETE" }); load(); toast("Cleared"); }
+    catch (e: any) { toast(e.message, "err"); }
+  };
+
+  const statusColor = (s: string) => s === "done" ? C.success : s === "failed" ? C.danger : s === "processing" ? C.warning : C.muted;
+  const counts = jobs.reduce((acc, j) => { acc[j.status] = (acc[j.status] ?? 0) + 1; return acc; }, {} as Record<string, number>);
+
+  return (
+    <>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 28 }}>
+        <div style={T.title as React.CSSProperties}>Job Queue</div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Btn label="Refresh" variant="ghost" onClick={load} />
+          <Btn label="Clear done" variant="ghost" onClick={clearDone} />
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 12, marginBottom: 20 }}>
+        {["", "pending", "processing", "done", "failed"].map(s => (
+          <div key={s} onClick={() => setStatusFilter(s)} style={{ ...T.statCard, padding: "12px 18px", cursor: "pointer", border: `1px solid ${statusFilter === s ? C.accent : C.border}` }}>
+            <div style={{ fontSize: 18, fontWeight: 700, color: s ? statusColor(s) : C.text }}>{s ? (counts[s] ?? 0) : jobs.length}</div>
+            <div style={{ fontSize: 10, color: C.muted, marginTop: 3, textTransform: "uppercase" as const, letterSpacing: 0.5 }}>{s || "all"}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={T.card}>
+        {loading ? <div style={T.empty}>Loading…</div> : !jobs.length ? <div style={T.empty}>No jobs</div> : (
+          <table style={T.table}>
+            <thead><tr>{["Type","Status","Attempts","Run At","Error",""].map(h => <th key={h} style={T.th}>{h}</th>)}</tr></thead>
+            <tbody>
+              {jobs.map(j => (
+                <tr key={j.id}>
+                  <td style={T.td}><span style={T.chip}>{j.type}</span></td>
+                  <td style={T.td}><span style={{ color: statusColor(j.status), fontWeight: 600, fontSize: 12 }}>{j.status}</span></td>
+                  <td style={{ ...T.td, color: C.muted }}>{j.attempts}/{j.maxAttempts}</td>
+                  <td style={{ ...T.td, color: C.muted }}>{new Date(j.runAt).toLocaleTimeString()}</td>
+                  <td style={{ ...T.td, color: C.danger, fontSize: 11, fontFamily: "monospace", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>{j.error ?? ""}</td>
+                  <td style={T.td}>{j.status === "failed" && <Btn label="Retry" variant="ghost" onClick={() => retry(j.id)} />}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </>
+  );
+}
+
+// ─── Audit Log ────────────────────────────────────────────
+function AuditPage() {
+  const [entries, setEntries] = useState<AuditEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [action, setAction] = useState("");
+  const [resource, setResource] = useState("");
+
+  const load = () => {
+    const q = new URLSearchParams({ limit: "100", ...(action ? { action } : {}), ...(resource ? { resource } : {}) });
+    api<AuditEntry[]>(`/audit?${q}`).then(e => { setEntries(e); setLoading(false); }).catch(() => setLoading(false));
+  };
+  useEffect(() => { load(); }, [action, resource]);
+
+  const ACTIONS = ["", "user.updated", "user.deleted", "apikey.revoked", "skill.created", "skill.deleted", "webhook.created", "webhook.deleted"];
+  const RESOURCES = ["", "user", "session", "api_key", "skill", "webhook_endpoint"];
+
+  return (
+    <>
+      <div style={T.title}>Audit Log</div>
+      <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
+        <select value={action} onChange={e => setAction(e.target.value)} style={{ ...T.input, width: 200, cursor: "pointer" }}>
+          {ACTIONS.map(a => <option key={a} value={a}>{a || "All actions"}</option>)}
+        </select>
+        <select value={resource} onChange={e => setResource(e.target.value)} style={{ ...T.input, width: 180, cursor: "pointer" }}>
+          {RESOURCES.map(r => <option key={r} value={r}>{r || "All resources"}</option>)}
+        </select>
+        <Btn label="Refresh" variant="ghost" onClick={load} />
+      </div>
+      <div style={T.card}>
+        {loading ? <div style={T.empty}>Loading…</div> : !entries.length ? <div style={T.empty}>No audit entries</div> : (
+          <table style={T.table}>
+            <thead><tr>{["Action","Resource","Who","IP","Time",""].map(h => <th key={h} style={T.th}>{h}</th>)}</tr></thead>
+            <tbody>
+              {entries.map(e => (
+                <tr key={e.id}>
+                  <td style={T.td}><span style={{ ...T.chip, fontFamily: "monospace", fontSize: 10 }}>{e.action}</span></td>
+                  <td style={T.td}><span style={T.chip}>{e.resource}</span>{e.resourceId && <span style={{ fontSize: 10, color: C.muted, marginLeft: 6, fontFamily: "monospace" }}>{e.resourceId.slice(0, 8)}…</span>}</td>
+                  <td style={{ ...T.td, color: C.faint }}>{e.userEmail ?? "—"}</td>
+                  <td style={{ ...T.td, color: C.muted, fontSize: 11 }}>{e.ip ?? "—"}</td>
+                  <td style={{ ...T.td, color: C.muted }}>{new Date(e.createdAt).toLocaleString()}</td>
+                  <td style={T.td}>
+                    {(e.before || e.after) && (
+                      <details style={{ cursor: "pointer" }}>
+                        <summary style={{ fontSize: 11, color: C.accent, listStyle: "none" }}>diff</summary>
+                        <pre style={{ fontSize: 10, color: C.muted, marginTop: 6, whiteSpace: "pre-wrap" as const }}>{e.before && `before: ${e.before}\n`}{e.after && `after: ${e.after}`}</pre>
+                      </details>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </>
+  );
+}
+
+// ─── Notifications Admin ──────────────────────────────────
+function NotificationsAdminPage({ toast }: { toast: (m: string, t?: "ok" | "err") => void }) {
+  const [notifs, setNotifs] = useState<Notification[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState(false);
+  const blank = { userId: "", title: "", body: "", url: "" };
+  const [form, setForm] = useState(blank);
+
+  const load = () => api<Notification[]>("/notifications?limit=50").then(n => { setNotifs(n); setLoading(false); }).catch(() => setLoading(false));
+  useEffect(() => { load(); }, []);
+
+  const send = async () => {
+    if (!form.title) return;
+    setSending(true);
+    try {
+      const r = await api<{ sent: number }>("/notifications/send", { method: "POST", body: JSON.stringify({ userId: form.userId || undefined, title: form.title, body: form.body || undefined, url: form.url || undefined }) });
+      toast(`Sent to ${r.sent} user${r.sent !== 1 ? "s" : ""}`);
+      setForm(blank); load();
+    } catch (e: any) { toast(e.message, "err"); }
+    setSending(false);
+  };
+
+  return (
+    <>
+      <div style={T.title}>Notifications</div>
+
+      <div style={{ ...T.card, marginBottom: 20 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: C.text, marginBottom: 16 }}>Send Notification</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+          <div><label style={T.label}>User ID <span style={{ color: C.muted }}>(leave blank to broadcast to all)</span></label><input style={T.input} value={form.userId} onChange={e => setForm(p => ({ ...p, userId: e.target.value }))} placeholder="All users" /></div>
+          <div><label style={T.label}>Title</label><input style={T.input} value={form.title} onChange={e => setForm(p => ({ ...p, title: e.target.value }))} placeholder="Notification title" /></div>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+          <div><label style={T.label}>Body <span style={{ color: C.muted }}>(optional)</span></label><input style={T.input} value={form.body} onChange={e => setForm(p => ({ ...p, body: e.target.value }))} /></div>
+          <div><label style={T.label}>URL <span style={{ color: C.muted }}>(optional, e.g. /dashboard)</span></label><input style={T.input} value={form.url} onChange={e => setForm(p => ({ ...p, url: e.target.value }))} /></div>
+        </div>
+        <Btn label={sending ? "Sending…" : "Send"} onClick={send} disabled={sending || !form.title} />
+      </div>
+
+      <div style={{ fontSize: 13, fontWeight: 600, color: C.text, marginBottom: 14 }}>Recent ({notifs.length})</div>
+      <div style={T.card}>
+        {loading ? <div style={T.empty}>Loading…</div> : !notifs.length ? <div style={T.empty}>No notifications yet</div> : (
+          <table style={T.table}>
+            <thead><tr>{["User","Title","Body","Read","Sent"].map(h => <th key={h} style={T.th}>{h}</th>)}</tr></thead>
+            <tbody>
+              {notifs.map(n => (
+                <tr key={n.id}>
+                  <td style={{ ...T.td, color: C.faint, fontSize: 12 }}>{n.userEmail}</td>
+                  <td style={T.td}>{n.url ? <a href={n.url} style={{ color: C.accent, textDecoration: "none" }}>{n.title}</a> : n.title}</td>
+                  <td style={{ ...T.td, color: C.muted, fontSize: 12 }}>{n.body ?? "—"}</td>
+                  <td style={T.td}>{n.read ? <span style={{ color: C.success, fontSize: 12 }}>✓</span> : <span style={{ color: C.muted, fontSize: 12 }}>—</span>}</td>
+                  <td style={{ ...T.td, color: C.muted }}>{new Date(n.createdAt).toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </>
+  );
+}
+
 // ─── FAQ ─────────────────────────────────────────────────
 const FAQ_ITEMS = [
   {
@@ -1341,7 +1959,14 @@ function FAQ() {
 }
 
 // ─── Sidebar ─────────────────────────────────────────────
-type Page = "dashboard" | "users" | "sessions" | "wallets" | "svc:auth" | "svc:email" | "svc:stripe" | "svc:crypto" | "svc:database" | "svc:storage" | "svc:agent" | "mcp" | "cron" | "push" | "logs" | "apikeys" | "faq";
+type Page = "dashboard" | "users" | "sessions" | "wallets" | "svc:auth" | "svc:email" | "svc:stripe" | "svc:crypto" | "svc:database" | "svc:storage" | "svc:agent" | "mcp" | "skills" | "cron" | "push" | "logs" | "jobs" | "apikeys" | "webhooks" | "flags" | "audit" | "notifs" | "faq";
+type Skill = { id: string; name: string; description: string | null; systemPrompt: string; provider: string; model: string; temperature: string; maxTokens: number; tools: string | null; enabled: boolean; createdAt: string };
+type WebhookEndpoint = { id: string; name: string; url: string; secret: string; events: string; enabled: boolean; createdAt: string };
+type WebhookDelivery = { id: string; endpointId: string; url: string; event: string; status: string; attempts: number; responseStatus: number | null; responseBody: string | null; createdAt: string };
+type FeatureFlag = { id: string; key: string; name: string; description: string | null; enabled: boolean; rules: string | null; createdAt: string };
+type Notification = { id: string; userId: string; userEmail: string; title: string; body: string | null; url: string | null; read: boolean; createdAt: string };
+type AuditEntry = { id: string; action: string; resource: string; resourceId: string | null; before: string | null; after: string | null; ip: string | null; userEmail: string | null; createdAt: string };
+type Job = { id: string; type: string; status: string; attempts: number; maxAttempts: number; runAt: string; processedAt: string | null; error: string | null; createdAt: string };
 
 const NAV = [
   { section: "General", items: [
@@ -1361,14 +1986,20 @@ const NAV = [
   { section: "AI", items: [
     { id: "svc:agent", label: "Agent Keys" },
     { id: "mcp",       label: "MCP Servers" },
+    { id: "skills",    label: "Skills" },
   ]},
   { section: "Security", items: [
-    { id: "apikeys", label: "API Keys" },
+    { id: "apikeys",  label: "API Keys" },
+    { id: "webhooks", label: "Webhooks" },
+    { id: "flags",    label: "Feature Flags" },
   ]},
   { section: "System", items: [
-    { id: "cron", label: "Cron Jobs" },
-    { id: "push", label: "Push / PWA" },
-    { id: "logs", label: "Logs" },
+    { id: "cron",   label: "Cron Jobs" },
+    { id: "jobs",   label: "Job Queue" },
+    { id: "push",   label: "Push / PWA" },
+    { id: "logs",   label: "Logs" },
+    { id: "notifs", label: "Notifications" },
+    { id: "audit",  label: "Audit Log" },
   ]},
 ];
 
@@ -1441,6 +2072,12 @@ function App() {
         {page === "push"      && <PushPage toast={showToast} />}
         {page === "logs"      && <LogViewer toast={showToast} />}
         {page === "apikeys"   && <ApiKeysPage toast={showToast} />}
+        {page === "skills"    && <SkillsPage toast={showToast} />}
+        {page === "webhooks"  && <WebhooksPage toast={showToast} />}
+        {page === "flags"     && <FlagsPage toast={showToast} />}
+        {page === "jobs"      && <JobQueuePage toast={showToast} />}
+        {page === "audit"     && <AuditPage />}
+        {page === "notifs"    && <NotificationsAdminPage toast={showToast} />}
         {page === "faq"       && <FAQ />}
         {svcId && <ServicePage svcId={svcId} toast={showToast} />}
       </main>

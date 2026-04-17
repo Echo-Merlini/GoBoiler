@@ -1,12 +1,21 @@
 import { Hono } from "hono";
 import { requireAdmin } from "@/auth/middleware";
 import { db } from "@/db/client";
-import { user, session, wallet, settings, cronJob, pushSubscription, appLog, apiKey } from "@/db/schema";
-import { eq, count, desc } from "drizzle-orm";
+import {
+  user, session, wallet, settings, cronJob, pushSubscription, appLog, apiKey,
+  skill, conversation, webhookEndpoint, webhookDelivery, featureFlag,
+  notification, auditLog, jobQueue,
+} from "@/db/schema";
+import { eq, count, desc, and } from "drizzle-orm";
 import { scheduleJob, stopJob, isRunning, runJobNow } from "@/lib/cron";
 import { createApiKey, revokeApiKey } from "@/lib/apikeys";
 import { generateVapidKeys } from "@/lib/push";
 import { testConnection, listFiles } from "@/lib/storage";
+import { generateWebhookSecret } from "@/lib/webhooks";
+import { invalidateFlagCache } from "@/lib/flags";
+import { sendNotification } from "@/lib/notify";
+import { runSkill } from "@/lib/skills";
+import { audit } from "@/lib/audit";
 import { nanoid } from "@/lib/utils";
 
 export const adminRoutes = new Hono();
@@ -60,7 +69,9 @@ adminRoutes.patch("/api/users/:id", requireAdmin, async (c) => {
 
   if (Object.keys(allowed).length === 0) return c.json({ error: "Nothing to update" }, 400);
 
+  const [before] = await db.select({ plan: user.plan, isAdmin: user.isAdmin }).from(user).where(eq(user.id, id));
   await db.update(user).set(allowed).where(eq(user.id, id));
+  audit(c, "user.updated", "user", id, before as any, allowed as any);
   return c.json({ ok: true });
 });
 
@@ -68,7 +79,9 @@ adminRoutes.delete("/api/users/:id", requireAdmin, async (c) => {
   const id = c.req.param("id");
   const me = c.get("user") as { id: string };
   if (me.id === id) return c.json({ error: "Cannot delete yourself" }, 400);
+  const [target] = await db.select({ email: user.email, plan: user.plan }).from(user).where(eq(user.id, id));
   await db.delete(user).where(eq(user.id, id));
+  audit(c, "user.deleted", "user", id, target as any);
   return c.json({ ok: true });
 });
 
@@ -485,7 +498,9 @@ adminRoutes.post("/api/apikeys", requireAdmin, async (c) => {
 });
 
 adminRoutes.delete("/api/apikeys/:id", requireAdmin, async (c) => {
-  await revokeApiKey(c.req.param("id"));
+  const id = c.req.param("id");
+  audit(c, "apikey.revoked", "api_key", id);
+  await revokeApiKey(id);
   return c.json({ ok: true });
 });
 
@@ -537,6 +552,208 @@ adminRoutes.get("/api/logs", requireAdmin, async (c) => {
 
 adminRoutes.delete("/api/logs", requireAdmin, async (c) => {
   await db.delete(appLog);
+  return c.json({ ok: true });
+});
+
+// ─── API: AI Skills ─────────────────────────────────────
+adminRoutes.get("/api/skills", requireAdmin, async (c) => {
+  const rows = await db.select().from(skill).orderBy(desc(skill.createdAt));
+  return c.json(rows);
+});
+
+adminRoutes.post("/api/skills", requireAdmin, async (c) => {
+  const body = await c.req.json<{
+    name: string; description?: string; systemPrompt: string;
+    provider: string; model: string; temperature?: string; maxTokens?: number; tools?: string; enabled?: boolean;
+  }>();
+  if (!body.name || !body.systemPrompt) return c.json({ error: "name and systemPrompt required" }, 400);
+  const [row] = await db.insert(skill).values({
+    id: nanoid(), name: body.name, description: body.description ?? null,
+    systemPrompt: body.systemPrompt, provider: body.provider ?? "anthropic",
+    model: body.model ?? "claude-sonnet-4-6", temperature: body.temperature ?? "0.7",
+    maxTokens: body.maxTokens ?? 2048, tools: body.tools ?? null,
+    enabled: body.enabled ?? true,
+  }).returning();
+  audit(c, "skill.created", "skill", row.id);
+  return c.json(row);
+});
+
+adminRoutes.patch("/api/skills/:id", requireAdmin, async (c) => {
+  const id = c.req.param("id");
+  const body = await c.req.json<Partial<{ name: string; description: string; systemPrompt: string; provider: string; model: string; temperature: string; maxTokens: number; tools: string; enabled: boolean }>>();
+  const [updated] = await db.update(skill).set({ ...body, updatedAt: new Date() }).where(eq(skill.id, id)).returning();
+  return c.json(updated);
+});
+
+adminRoutes.delete("/api/skills/:id", requireAdmin, async (c) => {
+  const id = c.req.param("id");
+  audit(c, "skill.deleted", "skill", id);
+  await db.delete(skill).where(eq(skill.id, id));
+  return c.json({ ok: true });
+});
+
+adminRoutes.post("/api/skills/:id/test", requireAdmin, async (c) => {
+  const id = c.req.param("id");
+  const body = await c.req.json<{ message: string; sessionId?: string }>();
+  if (!body.message) return c.json({ error: "message required" }, 400);
+  try {
+    const result = await runSkill(id, body.message, body.sessionId ?? nanoid());
+    return c.json(result);
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500);
+  }
+});
+
+// ─── API: Outgoing Webhooks ──────────────────────────────
+adminRoutes.get("/api/webhooks", requireAdmin, async (c) => {
+  const endpoints = await db.select().from(webhookEndpoint).orderBy(desc(webhookEndpoint.createdAt));
+  return c.json(endpoints);
+});
+
+adminRoutes.post("/api/webhooks", requireAdmin, async (c) => {
+  const body = await c.req.json<{ name: string; url: string; events?: string; secret?: string }>();
+  if (!body.name || !body.url) return c.json({ error: "name and url required" }, 400);
+  const [row] = await db.insert(webhookEndpoint).values({
+    id: nanoid(), name: body.name, url: body.url,
+    secret: body.secret || generateWebhookSecret(),
+    events: body.events ?? "*",
+  }).returning();
+  audit(c, "webhook.created", "webhook_endpoint", row.id);
+  return c.json(row);
+});
+
+adminRoutes.patch("/api/webhooks/:id", requireAdmin, async (c) => {
+  const id = c.req.param("id");
+  const body = await c.req.json<Partial<{ name: string; url: string; events: string; enabled: boolean }>>();
+  const [updated] = await db.update(webhookEndpoint).set(body).where(eq(webhookEndpoint.id, id)).returning();
+  return c.json(updated);
+});
+
+adminRoutes.delete("/api/webhooks/:id", requireAdmin, async (c) => {
+  const id = c.req.param("id");
+  audit(c, "webhook.deleted", "webhook_endpoint", id);
+  await db.delete(webhookEndpoint).where(eq(webhookEndpoint.id, id));
+  return c.json({ ok: true });
+});
+
+adminRoutes.get("/api/webhooks/deliveries", requireAdmin, async (c) => {
+  const endpointId = c.req.query("endpointId");
+  const limit = Math.min(Number(c.req.query("limit") ?? 50), 200);
+  const rows = await db
+    .select({ id: webhookDelivery.id, event: webhookDelivery.event, status: webhookDelivery.status, attempts: webhookDelivery.attempts, responseStatus: webhookDelivery.responseStatus, responseBody: webhookDelivery.responseBody, createdAt: webhookDelivery.createdAt, endpointId: webhookDelivery.endpointId, url: webhookEndpoint.url })
+    .from(webhookDelivery)
+    .innerJoin(webhookEndpoint, eq(webhookDelivery.endpointId, webhookEndpoint.id))
+    .where(endpointId ? eq(webhookDelivery.endpointId, endpointId) : undefined!)
+    .orderBy(desc(webhookDelivery.createdAt))
+    .limit(limit);
+  return c.json(rows);
+});
+
+// ─── API: Feature Flags ──────────────────────────────────
+adminRoutes.get("/api/flags", requireAdmin, async (c) => {
+  const flags = await db.select().from(featureFlag).orderBy(desc(featureFlag.createdAt));
+  return c.json(flags);
+});
+
+adminRoutes.post("/api/flags", requireAdmin, async (c) => {
+  const body = await c.req.json<{ key: string; name: string; description?: string; enabled?: boolean; rules?: string }>();
+  if (!body.key || !body.name) return c.json({ error: "key and name required" }, 400);
+  const [row] = await db.insert(featureFlag).values({
+    id: nanoid(), key: body.key, name: body.name,
+    description: body.description ?? null,
+    enabled: body.enabled ?? false,
+    rules: body.rules ?? null,
+  }).returning();
+  invalidateFlagCache();
+  return c.json(row);
+});
+
+adminRoutes.patch("/api/flags/:id", requireAdmin, async (c) => {
+  const id = c.req.param("id");
+  const body = await c.req.json<Partial<{ name: string; description: string; enabled: boolean; rules: string }>>();
+  const [updated] = await db.update(featureFlag).set({ ...body, updatedAt: new Date() }).where(eq(featureFlag.id, id)).returning();
+  invalidateFlagCache();
+  return c.json(updated);
+});
+
+adminRoutes.delete("/api/flags/:id", requireAdmin, async (c) => {
+  await db.delete(featureFlag).where(eq(featureFlag.id, c.req.param("id")));
+  invalidateFlagCache();
+  return c.json({ ok: true });
+});
+
+// ─── API: Notifications (admin) ──────────────────────────
+adminRoutes.get("/api/notifications", requireAdmin, async (c) => {
+  const userId = c.req.query("userId");
+  const limit = Math.min(Number(c.req.query("limit") ?? 100), 500);
+  const rows = await db
+    .select({ id: notification.id, userId: notification.userId, title: notification.title, body: notification.body, url: notification.url, read: notification.read, createdAt: notification.createdAt, userEmail: user.email })
+    .from(notification)
+    .innerJoin(user, eq(notification.userId, user.id))
+    .where(userId ? eq(notification.userId, userId) : undefined!)
+    .orderBy(desc(notification.createdAt))
+    .limit(limit);
+  return c.json(rows);
+});
+
+adminRoutes.post("/api/notifications/send", requireAdmin, async (c) => {
+  const body = await c.req.json<{ userId?: string; title: string; body?: string; url?: string }>();
+  if (!body.title) return c.json({ error: "title required" }, 400);
+
+  if (body.userId) {
+    await sendNotification({ userId: body.userId, title: body.title, body: body.body, url: body.url });
+    return c.json({ ok: true, sent: 1 });
+  }
+
+  // Broadcast to all users
+  const users = await db.select({ id: user.id }).from(user);
+  await Promise.all(users.map(u => sendNotification({ userId: u.id, title: body.title, body: body.body, url: body.url })));
+  return c.json({ ok: true, sent: users.length });
+});
+
+// ─── API: Audit Log ─────────────────────────────────────
+adminRoutes.get("/api/audit", requireAdmin, async (c) => {
+  const action   = c.req.query("action");
+  const userId   = c.req.query("userId");
+  const resource = c.req.query("resource");
+  const limit    = Math.min(Number(c.req.query("limit") ?? 100), 500);
+
+  const conditions = [];
+  if (action) conditions.push(eq(auditLog.action, action));
+  if (userId) conditions.push(eq(auditLog.userId, userId));
+  if (resource) conditions.push(eq(auditLog.resource, resource));
+
+  const rows = await db
+    .select({ id: auditLog.id, action: auditLog.action, resource: auditLog.resource, resourceId: auditLog.resourceId, before: auditLog.before, after: auditLog.after, ip: auditLog.ip, userAgent: auditLog.userAgent, createdAt: auditLog.createdAt, userId: auditLog.userId, userEmail: user.email })
+    .from(auditLog)
+    .leftJoin(user, eq(auditLog.userId, user.id))
+    .where(conditions.length ? and(...conditions as any) : undefined!)
+    .orderBy(desc(auditLog.createdAt))
+    .limit(limit);
+  return c.json(rows);
+});
+
+// ─── API: Job Queue ──────────────────────────────────────
+adminRoutes.get("/api/jobs", requireAdmin, async (c) => {
+  const status = c.req.query("status");
+  const limit  = Math.min(Number(c.req.query("limit") ?? 100), 500);
+  const rows = await db
+    .select()
+    .from(jobQueue)
+    .where(status ? eq(jobQueue.status, status) : undefined!)
+    .orderBy(desc(jobQueue.createdAt))
+    .limit(limit);
+  return c.json(rows);
+});
+
+adminRoutes.post("/api/jobs/:id/retry", requireAdmin, async (c) => {
+  const id = c.req.param("id");
+  await db.update(jobQueue).set({ status: "pending", runAt: new Date(), error: null }).where(eq(jobQueue.id, id));
+  return c.json({ ok: true });
+});
+
+adminRoutes.delete("/api/jobs/done", requireAdmin, async (c) => {
+  await db.delete(jobQueue).where(eq(jobQueue.status, "done"));
   return c.json({ ok: true });
 });
 

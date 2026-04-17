@@ -7,6 +7,8 @@ import { rateLimiter } from "hono-rate-limiter";
 import { routes } from "@/routes/index";
 import { initCronJobs } from "@/lib/cron";
 import { setLogEmitter } from "@/lib/logger";
+import { startQueue } from "@/lib/queue";
+import { registerWebhookWorker } from "@/lib/webhooks";
 import { emitLogEvent } from "@/routes/admin";
 import { auth } from "@/auth/auth";
 import { db } from "@/db/client";
@@ -86,6 +88,8 @@ const port = Number(process.env.PORT ?? 3000);
 setLogEmitter(emitLogEvent);
 seedAdmin().catch(e => console.warn("seedAdmin:", e.message));
 initCronJobs().catch(e => console.warn("initCronJobs:", e.message));
+registerWebhookWorker();
+startQueue();
 
 console.log(`🔥 GoBoiler running on http://localhost:${port}`);
 serve({ fetch: app.fetch, port });
