@@ -113,26 +113,31 @@ function Login({ onSuccess }: { onSuccess: () => void }) {
   };
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: C.bg }}>
-      <div style={{ width: 380, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: 36 }}>
-        <div style={{ marginBottom: 28 }}>
-          <div style={{ fontSize: 20, fontWeight: 700, color: C.text }}>GoBoiler</div>
-          <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>Sign in to admin panel</div>
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: C.bg, padding: 24 }}>
+      <div style={{ width: "100%", maxWidth: 400 }}>
+        <div style={{ textAlign: "center", marginBottom: 36 }}>
+          <div style={{ fontSize: 28, fontWeight: 700, color: C.text, letterSpacing: -0.5 }}>GoBoiler</div>
+          <div style={{ fontSize: 13, color: C.muted, marginTop: 6 }}>Admin Panel</div>
         </div>
-        <form onSubmit={submit}>
-          <div style={{ marginBottom: 16 }}>
-            <label style={T.label}>Email</label>
-            <input style={T.input} type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="admin@example.com" autoFocus />
-          </div>
-          <div style={{ marginBottom: 24 }}>
-            <label style={T.label}>Password</label>
-            <input style={T.input} type="password" value={pass} onChange={e => setPass(e.target.value)} placeholder="••••••••" />
-          </div>
-          {err && <div style={{ color: C.danger, fontSize: 13, marginBottom: 14 }}>{err}</div>}
-          <button type="submit" disabled={loading} style={{ width: "100%", padding: "10px", background: C.accentDark, color: "#fff", border: "none", borderRadius: 7, fontSize: 14, fontWeight: 600, cursor: "pointer", opacity: loading ? .7 : 1 }}>
-            {loading ? "Signing in…" : "Sign in"}
-          </button>
-        </form>
+        <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: "32px 36px" }}>
+          <form onSubmit={submit}>
+            <div style={{ marginBottom: 18 }}>
+              <label style={T.label}>Email</label>
+              <input style={T.input} type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="admin@example.com" autoFocus required />
+            </div>
+            <div style={{ marginBottom: 24 }}>
+              <label style={T.label}>Password</label>
+              <input style={T.input} type="password" value={pass} onChange={e => setPass(e.target.value)} placeholder="••••••••" required />
+            </div>
+            {err && <div style={{ color: C.danger, fontSize: 13, marginBottom: 16, padding: "10px 12px", background: "#2d0a0a", borderRadius: 6, border: "1px solid #7f1d1d" }}>{err}</div>}
+            <button type="submit" disabled={loading} style={{ width: "100%", padding: "11px", background: C.accentDark, color: "#fff", border: "none", borderRadius: 7, fontSize: 14, fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", opacity: loading ? .7 : 1, transition: "opacity .15s" }}>
+              {loading ? "Signing in…" : "Sign in"}
+            </button>
+          </form>
+        </div>
+        <div style={{ textAlign: "center", marginTop: 16, fontSize: 12, color: C.muted }}>
+          Use your <code style={{ color: C.faint }}>ADMIN_EMAIL</code> + <code style={{ color: C.faint }}>ADMIN_PASSWORD</code>
+        </div>
       </div>
     </div>
   );
@@ -468,7 +473,6 @@ function App() {
 
   return (
     <div style={T.layout}>
-      <style>{`* { box-sizing: border-box; margin: 0; padding: 0; } body { background: ${C.bg}; } input:focus { border-color: ${C.accent} !important; } select:focus { outline: none; border-color: ${C.accent} !important; }`}</style>
 
       <nav style={T.sidebar}>
         <div style={T.logoWrap}>

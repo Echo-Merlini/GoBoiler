@@ -24,6 +24,7 @@ export const user = pgTable("user", {
   stripeCustomerId: text("stripe_customer_id"),
   plan: text("plan").notNull().default("free"), // free | pro | enterprise
   isAdmin: boolean("is_admin").notNull().default(false),
+  twoFactorEnabled: boolean("two_factor_enabled").notNull().default(false),
 });
 
 export const session = pgTable("session", {
