@@ -30,9 +30,32 @@ Production-ready TypeScript backend boilerplate for SaaS and Web3 apps. Ships wi
 | **Cron Jobs** | node-cron scheduler, HTTP-triggered jobs, start/stop/run-now, persistent in DB |
 | **SSE** | Live log streaming + per-user notification stream via Server-Sent Events |
 | **Security** | Rate limiting per-route, CSP/HSTS/X-Frame security headers, scope middleware |
+| **Agent Security** | 🚧 In progress — see [Agent Security Proposal](docs/AGENT_SECURITY_PROPOSAL.md) |
 | **Logging** | Structured logger → DB + SSE broadcast; log viewer with live filter |
 | **Admin Panel** | React SPA at `/admin` — collapsible sidebar: General, Services, AI, Security, System sections |
 | **Middleware** | `requireAuth`, `requireAdmin`, `requireWallet`, `requirePlan`, `requireScope`, `requireToken`, `requireFlag` |
+
+---
+
+## Active Security Work
+
+### 🛡️ ERC-8004 Agent Security Proposal
+
+dinamic.eth is pioneering on-chain AI agents and has identified three security gaps not yet addressed by existing standards (ERC-8004, ERC-8126, ERC-8118):
+
+1. **Prompt injection via on-chain data** — ENS records and NFT metadata are permanent and immutable; a poisoned field affects every future agent that reads it
+2. **A2A trust chain scope** — no mechanism limits inter-agent trust transitivity; a single compromised agent poisons all downstream agents
+3. **Manifest/execution gap** — no proof the running agent follows its declared on-chain manifest
+
+**Full proposal + implementation status:** [`docs/AGENT_SECURITY_PROPOSAL.md`](docs/AGENT_SECURITY_PROPOSAL.md)
+
+| Phase | Description | Status |
+|-------|-------------|--------|
+| 1 | Input sanitization middleware | 🔴 Not started |
+| 2 | `inputSources` manifest declaration | 🔴 Not started |
+| 3 | ERC-8004 manifest endpoints | 🔴 Not started |
+| 4 | A2A trust scope + agent API key types | 🔴 Not started |
+| 5 | Execution attestation log | 🔴 Not started |
 
 ---
 
