@@ -4,7 +4,7 @@ import { db } from "@/db/client";
 import {
   user, session, wallet, settings, cronJob, pushSubscription, appLog, apiKey,
   skill, conversation, webhookEndpoint, webhookDelivery, featureFlag,
-  notification, auditLog, jobQueue,
+  notification, auditLog, jobQueue, agentExecutionLog,
 } from "@/db/schema";
 import { eq, count, desc, and } from "drizzle-orm";
 import { scheduleJob, stopJob, isRunning, runJobNow } from "@/lib/cron";
@@ -491,9 +491,19 @@ adminRoutes.get("/api/apikeys", requireAdmin, async (c) => {
 
 adminRoutes.post("/api/apikeys", requireAdmin, async (c) => {
   const me = c.get("user") as { id: string };
-  const body = await c.req.json<{ name: string; scopes?: string; expiresAt?: string }>();
+  const body = await c.req.json<{ name: string; scopes?: string; expiresAt?: string; keyType?: string; agentSkillId?: string }>();
   if (!body.name) return c.json({ error: "name required" }, 400);
   const raw = await createApiKey(me.id, body.name, body.scopes ?? "*", body.expiresAt ? new Date(body.expiresAt) : undefined);
+
+  // If an agent key, patch keyType/agentSkillId after creation (createApiKey returns raw key, key is in DB by now)
+  if (body.keyType === "agent") {
+    const { createHash } = await import("crypto");
+    const keyHash = createHash("sha256").update(raw).digest("hex");
+    await db.update(apiKey)
+      .set({ keyType: "agent", agentSkillId: body.agentSkillId ?? null })
+      .where(eq(apiKey.keyHash, keyHash));
+  }
+
   return c.json({ key: raw }); // shown once
 });
 
@@ -564,15 +574,23 @@ adminRoutes.get("/api/skills", requireAdmin, async (c) => {
 adminRoutes.post("/api/skills", requireAdmin, async (c) => {
   const body = await c.req.json<{
     name: string; description?: string; systemPrompt: string;
-    provider: string; model: string; temperature?: string; maxTokens?: number; tools?: string; enabled?: boolean;
+    provider: string; model: string; temperature?: string; maxTokens?: number;
+    tools?: string; enabled?: boolean; inputSources?: string; trustScope?: string;
   }>();
   if (!body.name || !body.systemPrompt) return c.json({ error: "name and systemPrompt required" }, 400);
+
+  // Validate JSON fields if provided
+  if (body.inputSources) { try { JSON.parse(body.inputSources); } catch { return c.json({ error: "inputSources must be valid JSON" }, 400); } }
+  if (body.trustScope)   { try { JSON.parse(body.trustScope);   } catch { return c.json({ error: "trustScope must be valid JSON" }, 400); } }
+
   const [row] = await db.insert(skill).values({
     id: nanoid(), name: body.name, description: body.description ?? null,
     systemPrompt: body.systemPrompt, provider: body.provider ?? "anthropic",
     model: body.model ?? "claude-sonnet-4-6", temperature: body.temperature ?? "0.7",
     maxTokens: body.maxTokens ?? 2048, tools: body.tools ?? null,
     enabled: body.enabled ?? true,
+    inputSources: body.inputSources ?? null,
+    trustScope: body.trustScope ?? null,
   }).returning();
   audit(c, "skill.created", "skill", row.id);
   return c.json(row);
@@ -580,7 +598,15 @@ adminRoutes.post("/api/skills", requireAdmin, async (c) => {
 
 adminRoutes.patch("/api/skills/:id", requireAdmin, async (c) => {
   const id = c.req.param("id");
-  const body = await c.req.json<Partial<{ name: string; description: string; systemPrompt: string; provider: string; model: string; temperature: string; maxTokens: number; tools: string; enabled: boolean }>>();
+  const body = await c.req.json<Partial<{
+    name: string; description: string; systemPrompt: string; provider: string;
+    model: string; temperature: string; maxTokens: number; tools: string;
+    enabled: boolean; inputSources: string; trustScope: string;
+  }>>();
+
+  if (body.inputSources !== undefined) { try { JSON.parse(body.inputSources); } catch { return c.json({ error: "inputSources must be valid JSON" }, 400); } }
+  if (body.trustScope !== undefined)   { try { JSON.parse(body.trustScope);   } catch { return c.json({ error: "trustScope must be valid JSON" }, 400); } }
+
   const [updated] = await db.update(skill).set({ ...body, updatedAt: new Date() }).where(eq(skill.id, id)).returning();
   return c.json(updated);
 });
@@ -755,6 +781,19 @@ adminRoutes.post("/api/jobs/:id/retry", requireAdmin, async (c) => {
 adminRoutes.delete("/api/jobs/done", requireAdmin, async (c) => {
   await db.delete(jobQueue).where(eq(jobQueue.status, "done"));
   return c.json({ ok: true });
+});
+
+// ─── API: Execution Attestations ────────────────────────
+adminRoutes.get("/api/attestations", requireAdmin, async (c) => {
+  const skillId = c.req.query("skillId");
+  const limit   = Math.min(Number(c.req.query("limit") ?? 100), 500);
+  const rows = await db
+    .select()
+    .from(agentExecutionLog)
+    .where(skillId ? eq(agentExecutionLog.skillId, skillId) : undefined!)
+    .orderBy(desc(agentExecutionLog.createdAt))
+    .limit(limit);
+  return c.json(rows);
 });
 
 // ─── Static SPA (after all API routes) ──────────────────

@@ -1,8 +1,11 @@
 import { db } from "@/db/client";
 import { skill, conversation, settings } from "@/db/schema";
+import type { InputSource } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { nanoid } from "@/lib/utils";
 import { sanitizeOnChainInput } from "@/lib/sanitize";
+import type { OnChainSourceType } from "@/lib/sanitize";
+import { hashContent, buildManifestHash, logExecution } from "@/lib/attestation";
 
 export type Message = { role: "user" | "assistant" | "system"; content: string };
 
@@ -34,7 +37,25 @@ export async function listEnabledSkills() {
     description: skill.description,
     provider: skill.provider,
     model: skill.model,
+    inputSources: skill.inputSources,
+    trustScope: skill.trustScope,
   }).from(skill).where(eq(skill.enabled, true));
+}
+
+export function validateInputSource(
+  sourceType: OnChainSourceType,
+  declaredSources: InputSource[] | null
+): { allowed: boolean; shouldSanitize: boolean } {
+  // null = unscoped (backward compat): allow but caller should sanitize + log warning
+  if (!declaredSources) return { allowed: true, shouldSanitize: true };
+
+  const match = declaredSources.find(s => {
+    const normalized = s.type.replace(/_/g, "_"); // normalize for comparison
+    return sourceType.startsWith(normalized) || normalized === sourceType;
+  });
+
+  if (!match) throw new Error(`Input source not declared: ${sourceType}`);
+  return { allowed: true, shouldSanitize: match.sanitize };
 }
 
 export async function runSkill(
@@ -64,6 +85,12 @@ export async function runSkill(
 
   let reply = "";
   let usage: Record<string, number> | undefined;
+  const inputHash = hashContent(safeMessage);
+  const manifestHash = buildManifestHash(sk);
+  const startMs = Date.now();
+  let errorMessage: string | undefined;
+
+  try {
 
   if (sk.provider === "anthropic") {
     const msgs = [...history, newUserMsg].filter(m => m.role !== "system");
@@ -148,6 +175,24 @@ export async function runSkill(
       userId: userId ?? null,
       sessionId,
       messages: JSON.stringify(updatedMessages),
+    });
+  }
+
+  } catch (e: any) {
+    errorMessage = e.message;
+    throw e;
+  } finally {
+    logExecution({
+      skillId,
+      sessionId,
+      userId,
+      actionType: "chat",
+      inputHash,
+      outputHash: reply ? hashContent(reply) : null,
+      manifestHash,
+      callerDepth: 0,
+      errorMessage,
+      durationMs: Date.now() - startMs,
     });
   }
 

@@ -4,6 +4,7 @@ import {
   timestamp,
   boolean,
   integer,
+  index,
 } from "drizzle-orm/pg-core";
 
 // ─── Better Auth core tables ─────────────────────────────
@@ -144,6 +145,9 @@ export const apiKey = pgTable("api_key", {
   lastUsedAt: timestamp("last_used_at"),
   expiresAt: timestamp("expires_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
+  // Phase 4 — A2A trust: "user" keys bypass A2A checks; "agent" keys are subject to trustScope
+  keyType: text("key_type").notNull().default("user"),    // "user" | "agent"
+  agentSkillId: text("agent_skill_id"),                   // set when keyType = "agent"
 });
 
 // ─── App Logs ────────────────────────────────────────────
@@ -212,7 +216,25 @@ export const skill = pgTable("skill", {
   enabled: boolean("enabled").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  // Phase 2 — ERC-8004 security: declare on-chain data sources and A2A trust limits
+  inputSources: text("input_sources"),  // JSON: InputSource[] — null = unscoped (warn + allow)
+  trustScope: text("trust_scope"),      // JSON: TrustScope   — null = { transitive:false, maxDepth:0 }
 });
+
+// Types colocated with schema for use across the security layer
+export type InputSource = {
+  type: "ens" | "nft_metadata" | "contract_return" | "user_message" | "a2a";
+  keys?: string[];
+  trust: "trusted" | "untrusted";
+  sanitize: boolean;
+  maxLength?: number;
+};
+
+export type TrustScope = {
+  transitive: boolean;
+  maxDepth: number;
+  capabilities: string[];
+};
 
 export const conversation = pgTable("conversation", {
   id: text("id").primaryKey(),
@@ -287,6 +309,27 @@ export const auditLog = pgTable("audit_log", {
   userAgent: text("user_agent"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
+
+// ─── Agent Execution Attestation Log (Phase 5) ───────────
+export const agentExecutionLog = pgTable("agent_execution_log", {
+  id: text("id").primaryKey(),
+  skillId: text("skill_id").references(() => skill.id, { onDelete: "set null" }),
+  sessionId: text("session_id"),
+  userId: text("user_id").references(() => user.id, { onDelete: "set null" }),
+  actionType: text("action_type").notNull(),   // "chat" | "tool_call" | "a2a_call"
+  inputHash: text("input_hash"),               // SHA-256 of sanitized user message
+  outputHash: text("output_hash"),             // SHA-256 of reply (null on error)
+  manifestHash: text("manifest_hash"),         // SHA-256 of skill manifest at call time
+  sourceContext: text("source_context"),       // JSON: { type: InputSourceType }
+  callerDepth: integer("caller_depth").notNull().default(0),
+  errorMessage: text("error_message"),
+  durationMs: integer("duration_ms"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  index("ael_skill_id_idx").on(t.skillId),
+  index("ael_session_id_idx").on(t.sessionId),
+  index("ael_created_at_idx").on(t.createdAt),
+]);
 
 // ─── Background Job Queue ────────────────────────────────
 export const jobQueue = pgTable("job_queue", {
