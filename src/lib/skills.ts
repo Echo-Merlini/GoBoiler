@@ -2,6 +2,7 @@ import { db } from "@/db/client";
 import { skill, conversation, settings } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { nanoid } from "@/lib/utils";
+import { sanitizeOnChainInput } from "@/lib/sanitize";
 
 export type Message = { role: "user" | "assistant" | "system"; content: string };
 
@@ -51,7 +52,14 @@ export async function runSkill(
   // Load conversation history
   const [existing] = await db.select().from(conversation).where(eq(conversation.sessionId, sessionId));
   const history: Message[] = existing ? JSON.parse(existing.messages) : [];
-  const newUserMsg: Message = { role: "user", content: userMessage };
+
+  // Last-resort guard: if userMessage somehow contains on-chain provenance labels,
+  // it means on-chain data was forwarded as a user turn — strip injection patterns.
+  const safeMessage = userMessage.includes("[on-chain:")
+    ? sanitizeOnChainInput(userMessage, "contract_return")
+    : userMessage;
+
+  const newUserMsg: Message = { role: "user", content: safeMessage };
   const tools = sk.tools ? JSON.parse(sk.tools) : [];
 
   let reply = "";
