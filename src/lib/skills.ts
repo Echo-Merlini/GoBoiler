@@ -67,30 +67,27 @@ export async function runSkill(
   const [sk] = await db.select().from(skill).where(eq(skill.id, skillId));
   if (!sk || !sk.enabled) throw new Error("Skill not found or disabled");
 
+  // Pre-compute attestation fields before any throws so finally can always log
+  const safeMessage = userMessage.includes("[on-chain:")
+    ? sanitizeOnChainInput(userMessage, "contract_return")
+    : userMessage;
+  const inputHash = hashContent(safeMessage);
+  const manifestHash = buildManifestHash(sk);
+  const startMs = Date.now();
+  let reply = "";
+  let usage: Record<string, number> | undefined;
+  let errorMessage: string | undefined;
+
+  try {
+
   const apiKey = await getApiKey(sk.provider);
   if (!apiKey) throw new Error(`No API key configured for provider: ${sk.provider}`);
 
   // Load conversation history
   const [existing] = await db.select().from(conversation).where(eq(conversation.sessionId, sessionId));
   const history: Message[] = existing ? JSON.parse(existing.messages) : [];
-
-  // Last-resort guard: if userMessage somehow contains on-chain provenance labels,
-  // it means on-chain data was forwarded as a user turn — strip injection patterns.
-  const safeMessage = userMessage.includes("[on-chain:")
-    ? sanitizeOnChainInput(userMessage, "contract_return")
-    : userMessage;
-
   const newUserMsg: Message = { role: "user", content: safeMessage };
   const tools = sk.tools ? JSON.parse(sk.tools) : [];
-
-  let reply = "";
-  let usage: Record<string, number> | undefined;
-  const inputHash = hashContent(safeMessage);
-  const manifestHash = buildManifestHash(sk);
-  const startMs = Date.now();
-  let errorMessage: string | undefined;
-
-  try {
 
   if (sk.provider === "anthropic") {
     const msgs = [...history, newUserMsg].filter(m => m.role !== "system");
