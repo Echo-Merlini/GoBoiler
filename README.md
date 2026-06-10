@@ -548,6 +548,20 @@ GET /agent/history/:sessionId
 
 Providers: `anthropic` (native API), `openai` / `groq` (OpenAI-compatible), `mistral`. Keys are read from the `service_config` DB table or env vars.
 
+### On-chain attestation (ccip-router)
+
+For verifiable, tamper-evident AI agent execution logs, run [ccip-router](https://github.com/Echo-Merlini/ccip-router) alongside GoBoiler. Every agent call gets an EIP-712 signed attestation anchored to `AttestationIndex` (ERC-8281) and optionally forwarded to `TruthAnchorV1` (ERC-8263), emitting an `AnchorProof` event on-chain.
+
+Key env vars on the **ccip-router** node (not GoBoiler):
+
+| Env var | Description |
+|---|---|
+| `ATTESTATION_INDEX` | ERC-8281 commitment store. Mainnet: `0xc7BCCD785Fb994e570d0ca10D0F7899d87C82210` |
+| `RPC_URL` | JSON-RPC endpoint for on-chain writes |
+| `TRUTH_ANCHOR_ADDRESS` | ERC-8263 `TruthAnchorV1` — fires `AnchorProof(agentIdScheme, agentId, proofHash, operator, aux)` alongside every `AttestationIndex.record()`. Mainnet: `0xe95d6a15966984c209a62a2c188828555eb5ec3d` |
+
+The ccip-router admin panel's ERC-8263 spec card shows `⚠ Partial` when `TRUTH_ANCHOR_ADDRESS` is not configured, and `✓ Pass` once both anchors are live. See the [ccip-router README](https://github.com/Echo-Merlini/ccip-router) for the full integration guide.
+
 ---
 
 ## Outgoing Webhooks
